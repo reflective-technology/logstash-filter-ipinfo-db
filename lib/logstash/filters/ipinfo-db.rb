@@ -81,7 +81,8 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   end
 
   def filter(event)
-    check_database_age if @next_age_check && Time.now >= @next_age_check
+    next_age_check = @next_age_check
+    check_database_age if next_age_check && Time.now >= next_age_check
     @logger.debug? && @logger.debug("Running ipinfo-db lookup", :event => event)
     ip = event.get(@source)
 
