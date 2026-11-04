@@ -2,6 +2,8 @@
 require "logstash/filters/base"
 require 'down'
 require 'maxmind/db'
+require 'fileutils'
+require 'securerandom'
 
 $MMDB_FILE_DOWNLOAD_URL = "https://ipinfo.io/data/free/country_asn.mmdb"
 $MMDB_FILE_NAME = "country_asn.mmdb"
@@ -72,21 +74,40 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   def setup_database
     @database ||= default_database_path
 
-    # Download mmdb file from ipinfo.io if not found
-    if !File.exist?(@database)
+    if File.exist?(@database)
+      @db = MaxMind::DB.new(@database, mode: MaxMind::DB::MODE_MEMORY)
+    else
       if @token.nil? || @token.value.to_s.empty?
         raise LogStash::ConfigurationError, "ipinfo-db: database file #{@database} not found. Set `token` to download it, or place the file there."
       end
-      @logger.info("Downloading ipinfo database", :path => @database)
-      FileUtils.mkdir_p(File.dirname(@database))
-      tempfile = Down.download("#{$MMDB_FILE_DOWNLOAD_URL}?token=#{@token.value}")
-      FileUtils.mv(tempfile.path, @database)
+      @db = download_database
     end
-    # Load .mmdb file in MaxMindDB reader
-    @db = MaxMind::DB.new(@database, mode: MaxMind::DB::MODE_MEMORY)
   end
 
   private
+
+  # Download into a temp file next to @database, check that it is a readable
+  # database, then rename it into place. The rename is atomic, so @database is
+  # never a partial or invalid file, even if the download is interrupted or
+  # several pipelines download at the same time.
+  def download_database
+    @logger.info("Downloading ipinfo database", :path => @database)
+    dir = File.dirname(@database)
+    FileUtils.mkdir_p(dir)
+    tmp_path = File.join(dir, ".#{File.basename(@database)}.#{SecureRandom.hex(8)}.tmp")
+
+    tempfile = Down.download("#{$MMDB_FILE_DOWNLOAD_URL}?token=#{@token.value}")
+    FileUtils.mv(tempfile.path, tmp_path)
+    begin
+      db = MaxMind::DB.new(tmp_path, mode: MaxMind::DB::MODE_MEMORY)
+    rescue MaxMind::DB::InvalidDatabaseError => e
+      raise LogStash::ConfigurationError, "ipinfo-db: downloaded database is not a valid .mmdb file: #{e.message}"
+    end
+    File.rename(tmp_path, @database)
+    db
+  ensure
+    FileUtils.rm_f(tmp_path) if tmp_path
+  end
 
   # Keep the downloaded database under Logstash's data directory, which is
   # writable by the logstash user and persists across restarts.

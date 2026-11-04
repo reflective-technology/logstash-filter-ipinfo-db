@@ -3,6 +3,7 @@ require_relative '../spec_helper'
 require "logstash/filters/ipinfo-db"
 require "fileutils"
 require "tmpdir"
+require "tempfile"
 
 describe LogStash::Filters::IpinfoDb do
   describe "ipinfo lookup test" do
@@ -36,6 +37,17 @@ describe LogStash::Filters::IpinfoDb do
       missing = File.join(data_dir, "missing.mmdb")
       plugin = described_class.new("source" => "ip", "database" => missing)
       expect { plugin.register }.to raise_error(LogStash::ConfigurationError, /#{Regexp.escape(missing)}/)
+    end
+
+    it "does not keep an invalid download" do
+      bad = Tempfile.new("bad-mmdb")
+      bad.write("not a database")
+      bad.flush
+      allow(Down).to receive(:download).and_return(bad)
+      database = File.join(data_dir, "ipinfo.mmdb")
+      plugin = described_class.new("source" => "ip", "database" => database, "token" => "t")
+      expect { plugin.register }.to raise_error(LogStash::ConfigurationError, /not a valid \.mmdb/)
+      expect(Dir.children(data_dir)).to be_empty
     end
   end
 end
