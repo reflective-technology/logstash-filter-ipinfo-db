@@ -47,6 +47,34 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # Checked at startup and then once a day. Set to 0 to disable.
   config :database_age_warning_days, :validate => :number, :default => 30
 
+  # One in-memory reader per database file, shared by every filter instance in
+  # the process (several ipinfo-db blocks, pipelines, config reloads), so the
+  # database is held in the heap once. Readers are safe to use from multiple
+  # threads. Entries are keyed by the file's identity, so a replaced file is
+  # loaded again by the next instance that registers.
+  @shared_readers = {}
+  @shared_readers_mutex = Mutex.new
+
+  class << self
+    def shared_reader(path)
+      path = File.expand_path(path)
+      stat = File.stat(path)
+      identity = [stat.ino, stat.size, stat.mtime.to_r]
+      @shared_readers_mutex.synchronize do
+        entry = @shared_readers[path]
+        return entry[:reader] if entry && entry[:identity] == identity
+        reader = yield
+        @shared_readers[path] = { :identity => identity, :reader => reader }
+        reader
+      end
+    end
+
+    # For specs.
+    def clear_shared_readers
+      @shared_readers_mutex.synchronize { @shared_readers.clear }
+    end
+  end
+
   def register
     setup_database
     check_database_age
@@ -97,12 +125,13 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
     @database ||= default_database_path
 
     if File.exist?(@database)
-      @db = MaxMind::DB.new(@database, mode: MaxMind::DB::MODE_MEMORY)
+      @db = self.class.shared_reader(@database) { MaxMind::DB.new(@database, mode: MaxMind::DB::MODE_MEMORY) }
     else
       if @token.nil? || @token.value.to_s.empty?
         raise LogStash::ConfigurationError, "ipinfo-db: database file #{@database} not found. Set `token` to download it, or place the file there."
       end
-      @db = download_database
+      downloaded = download_database
+      @db = self.class.shared_reader(@database) { downloaded }
     end
   end
 

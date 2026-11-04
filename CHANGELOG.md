@@ -13,6 +13,8 @@
     (faster on JRuby); log unexpected lookup errors as warnings instead of swallowing them
   - IPs that are valid but not in the database are no longer tagged with `tag_on_failure`;
     the event is left unchanged
+  - Filters that use the same database file share one in-memory copy instead of loading one
+    each (several `ipinfo-db` blocks, pipelines, config reloads)
   - Pin `down` to `~> 5.2` (compatible with `logstash-core`, which requires `down ~> 5.2.0`)
     and `maxmind-db` to `~> 1.2`
   - Docs: README now documents installation and settings; `source` docs no longer claim hostname

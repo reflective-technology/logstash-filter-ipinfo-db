@@ -67,6 +67,10 @@ directories as needed. `path.data` is the Logstash data directory (for example `
 deb/rpm installs and `/usr/share/logstash/data` in Docker). Use an absolute path; a relative path is resolved
 against the Logstash working directory.
 
+The database is loaded into memory once per file: all `ipinfo-db` filters in the Logstash process that use
+the same path (including across pipelines and config reloads) share one copy. If the file is replaced, the
+next filter that starts, for example after a config reload, loads the new file.
+
 [id="plugins-{type}s-{plugin}-database_age_warning_days"]
 ===== `database_age_warning_days`
 

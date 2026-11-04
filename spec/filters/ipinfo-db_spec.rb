@@ -10,6 +10,48 @@ require "ipaddr"
 FIXTURE_DATABASE = File.expand_path("../fixtures/ipinfo-test.mmdb", __dir__)
 
 describe LogStash::Filters::IpinfoDb do
+  after { described_class.clear_shared_readers }
+
+  describe "shared database reader" do
+    let(:data_dir) { Dir.mktmpdir }
+    let(:database) { File.join(data_dir, "ipinfo.mmdb").tap { |path| FileUtils.cp(FIXTURE_DATABASE, path) } }
+    after { FileUtils.rm_rf(data_dir) }
+
+    def registered(path)
+      described_class.new("source" => "ip", "database" => path, "database_age_warning_days" => 0).tap(&:register)
+    end
+
+    def reader(plugin)
+      plugin.instance_variable_get(:@db)
+    end
+
+    it "loads a database file once for all filter instances" do
+      expect(MaxMind::DB).to receive(:new).once.and_call_original
+      first = registered(database)
+      second = registered(database)
+      expect(reader(second)).to equal(reader(first))
+
+      event = LogStash::Event.new("ip" => "192.0.2.10")
+      second.filter(event)
+      expect(event.get("[ipinfo-db][country]")).to eq("US")
+    end
+
+    it "loads the file again after it is replaced" do
+      first = registered(database)
+      replacement = File.join(data_dir, "replacement.mmdb")
+      FileUtils.cp(FIXTURE_DATABASE, replacement)
+      File.rename(replacement, database)
+      second = registered(database)
+      expect(reader(second)).not_to equal(reader(first))
+    end
+
+    it "keeps separate readers for different files" do
+      other = File.join(data_dir, "other.mmdb")
+      FileUtils.cp(FIXTURE_DATABASE, other)
+      expect(reader(registered(other))).not_to equal(reader(registered(database)))
+    end
+  end
+
   describe "pipeline lookups against the fixture database" do
     config <<-CONFIG
       filter {
