@@ -4,9 +4,9 @@ Gem::Specification.new do |s|
   s.licenses      = ['Apache-2.0']
   s.summary       = 'Logstash Filter Plugin for IPinfoDb'
   s.description   = ''
-  s.homepage      = 'https://ipinfo.io'
-  s.authors       = ['Muhammad Awais Murad']
-  s.email         = 'awais@ipinfo.io'
+  s.homepage      = 'https://github.com/reflective-technology/logstash-filter-ipinfo-db'
+  s.authors       = ['ZUIN RD']
+  s.email         = 'rd@zuin.ai'
   s.require_paths = ['lib']
 
   # Files
