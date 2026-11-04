@@ -1,4 +1,4 @@
-:plugin: logstash-filter-ipinfo-db
+:plugin: logstash-filter-ipinfo-db-zuin
 :type: filter
 
 ///////////////////////////////////////////
@@ -14,7 +14,7 @@ END - GENERATED VARIABLES, DO NOT EDIT!
 
 [id="plugins-{type}s-{plugin}"]
 
-=== logstash-filter-ipinfo-db filter plugin
+=== logstash-filter-ipinfo-db-zuin filter plugin
 
 include::{include_path}/plugin_header.asciidoc[]
 
@@ -30,6 +30,7 @@ result of lookup in `bar`, do this:
       ipinfo-db {
         source => "foo"
         target => "bar"
+        token => "${IPINFO_TOKEN}"
       }
     }
 
@@ -41,15 +42,47 @@ This plugin supports the following configuration options plus the <<plugins-{typ
 [cols="<,<,<",options="header",]
 |=======================================================================
 |Setting |Input type|Required
+| <<plugins-{type}s-{plugin}-database>> |<<string,string>>|No
+| <<plugins-{type}s-{plugin}-database_age_warning_days>> |<<number,number>>|No
 | <<plugins-{type}s-{plugin}-source>> |<<string,string>>|Yes
 | <<plugins-{type}s-{plugin}-tag_on_failure>> |<<array,array>>|No
 | <<plugins-{type}s-{plugin}-target>> |<<string,string>>|No
+| <<plugins-{type}s-{plugin}-token>> |<<password,password>>|No
 |=======================================================================
 
 Also see <<plugins-{type}s-{plugin}-common-options>> for a list of options supported by all
 filter plugins.
 
 &nbsp;
+
+[id="plugins-{type}s-{plugin}-database"]
+===== `database`
+
+  * Value type is <<string,string>>
+  * Default value is `<path.data>/plugins/filters/ipinfo-db/country_asn.mmdb`
+
+Path to the ipinfo `.mmdb` database file. If the file exists, the plugin uses it as is. If it does not exist,
+the plugin downloads it to this path on startup using <<plugins-{type}s-{plugin}-token>>, creating parent
+directories as needed. `path.data` is the Logstash data directory (for example `/var/lib/logstash` for
+deb/rpm installs and `/usr/share/logstash/data` in Docker). Use an absolute path; a relative path is resolved
+against the Logstash working directory.
+
+The database is loaded into memory once per file: all `ipinfo-db` filters in the Logstash process that use
+the same path (including across pipelines and config reloads) share one copy. If the file is replaced, the
+next filter that starts, for example after a config reload, loads the new file. When no running filter uses a
+database any more (its pipelines stopped, or were reloaded with a different `database` path), it is released
+from memory.
+
+[id="plugins-{type}s-{plugin}-database_age_warning_days"]
+===== `database_age_warning_days`
+
+  * Value type is <<number,number>>
+  * Default value is `30`
+
+The plugin does not update the database by itself. It logs a warning when the database was built more than this
+many days ago, using the build time stored in the `.mmdb` file. The check runs at startup and then once a day.
+To refresh the database, delete the file so it is downloaded again on the next start, or replace it with a newer
+copy. Set to `0` to disable the warning.
 
 [id="plugins-{type}s-{plugin}-source"]
 ===== `source` 
@@ -58,7 +91,8 @@ filter plugins.
   * Value type is <<string,string>>
   * There is no default value for this setting.
 
-The field containing the IP address or hostname to map via ipinfo-db plugin. The field to lookup in ipinfo database.
+The field containing the IP address (IPv4 or IPv6) to look up in the ipinfo database. Hostnames are not resolved;
+a value that is not a valid IP address tags the event with <<plugins-{type}s-{plugin}-tag_on_failure>>.
 
 [id="plugins-{type}s-{plugin}-tag_on_failure"]
 ===== `tag_on_failure`
@@ -66,17 +100,28 @@ The field containing the IP address or hostname to map via ipinfo-db plugin. The
   * Value type is <<array,array>>
   * Default value is `["_ipinfo_db_lookup_failure"]`
 
-Tags the event on failure to look up geo information in ipinfo.io free country and ASN database. This can be used in later analysis.
+Tags the event when the lookup cannot be done: the source field is missing or empty, the value is not a valid
+IP address, or the lookup raises an error. This can be used in later analysis. An IP address that is valid but
+not in the database (for example a private address) is not a failure: the event is left unchanged and not tagged.
 
 [id="plugins-{type}s-{plugin}-target"]
 ===== `target` 
 
   * Value type is <<string,string>>
-  * There is no default value for this setting.
   * Default value is `ipinfo-db`
 
 The field to write the lookup results into. 
 
+
+[id="plugins-{type}s-{plugin}-token"]
+===== `token`
+
+  * Value type is <<password,password>>
+  * There is no default value for this setting.
+
+Your ipinfo.io access token, used to download the database when the file at
+<<plugins-{type}s-{plugin}-database>> does not exist. If the file is missing and no token is set, the plugin fails to start.
+To keep the token out of the pipeline config, use `${IPINFO_TOKEN}` with an environment variable or the Logstash keystore.
 
 [id="plugins-{type}s-{plugin}-common-options"]
 include::{include_path}/{type}.asciidoc[]
