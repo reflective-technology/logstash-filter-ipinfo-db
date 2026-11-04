@@ -2,10 +2,9 @@ name: Release
 
 # Publishes the gem to RubyGems and creates a GitHub Release when a version tag is pushed.
 #
-# To release:
-#   1. Set s.version in logstash-filter-ipinfo-db-zuin.gemspec and add a "## <version>" section at the top of
-#      CHANGELOG.md, then merge to main.
-#   2. git tag v<version> && git push origin v<version>
+# To release: set s.version in logstash-filter-ipinfo-db-zuin.gemspec and add a "## <version>" section at
+# the top of CHANGELOG.md, then merge to main. tag.yml sees the new gemspec version and pushes
+# v<version>, which starts this workflow. (Pushing the tag by hand also works.)
 #
 # The tag must match the gemspec version, the newest CHANGELOG.md section must be for it, and the verify
 # workflow must pass before anything is published. RubyGems authentication uses trusted publishing
@@ -25,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.VERSION }}
+      prerelease: ${{ steps.version.outputs.PRERELEASE }}
 
     steps:
       - name: Checkout code
@@ -53,6 +53,9 @@ jobs:
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          # RubyGems treats any version with a letter (e.g. 0.2.0.rc1) as a pre-release.
+          PRERELEASE=$(ruby -e 'puts Gem::Version.new(ARGV[0]).prerelease?' "$VERSION")
+          echo "PRERELEASE=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
   verify:
     needs: check
@@ -108,4 +111,5 @@ jobs:
           files: |
             *.gem
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.check.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.check.outputs.prerelease == 'true' && 'false' || 'true' }}

@@ -1,0 +1,90 @@
+name: Auto Tagging
+
+# When the gemspec version changes on main, push the matching v<version> tag. The tag push triggers
+# release.yml, which verifies, publishes to RubyGems and creates the GitHub Release.
+#
+# The tag is pushed with a GitHub App token: tags pushed with the default GITHUB_TOKEN do not
+# trigger other workflows, so release.yml would never run.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "logstash-filter-ipinfo-db-zuin.gemspec"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      value: ${{ steps.get_version.outputs.value }}
+      tagged: ${{ steps.tagged.outputs.tagged }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.3"
+
+      - name: Get Version
+        id: get_version
+        run: |
+          version=$(ruby -e 'puts Gem::Specification.load("logstash-filter-ipinfo-db-zuin.gemspec").version')
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: "Check: if the version has corresponding git tag"
+        id: tagged
+        shell: bash
+        run: |
+          git show-ref --tags --verify --quiet -- "refs/tags/v${{ steps.get_version.outputs.value }}" &&
+          echo "tagged=0" >> "$GITHUB_OUTPUT" ||
+          echo "tagged=1" >> "$GITHUB_OUTPUT"
+
+      - name: "Check: CHANGELOG has a section for the new version"
+        if: steps.tagged.outputs.tagged == '1'
+        env:
+          VERSION: ${{ steps.get_version.outputs.value }}
+        run: |
+          # release.yml requires this too; checking here avoids pushing a tag it would reject.
+          latest=$(grep -m1 '^## ' CHANGELOG.md || true)
+          if [ "$latest" != "## $VERSION" ]; then
+            echo "::error::The newest CHANGELOG.md section is '$latest'; expected '## $VERSION'. Not tagging."
+            exit 1
+          fi
+
+      - name: Debug Version
+        run: echo "VERSION=${{ steps.get_version.outputs.value }} tagged=${{ steps.tagged.outputs.tagged }}"
+
+  tag:
+    runs-on: ubuntu-latest
+    needs: version
+    if: needs.version.outputs.tagged == '1'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TAG_GITHUB_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Push tag
+        id: tag_version
+        uses: reflective-technology/github-tag-action@85675313df09822536e1584a675156d2b96779fa # v2.0.2
+        with:
+          github_token: ${{ steps.generate-token.outputs.token }}
+          tag_prefix: "v"
+          custom_tag: ${{ needs.version.outputs.value }}
+
+      - name: Debug Tag
+        run: echo "Pushed ${{ steps.tag_version.outputs.new_tag }}; release.yml publishes it."
