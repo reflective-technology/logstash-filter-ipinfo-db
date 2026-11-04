@@ -4,6 +4,7 @@ require "logstash/filters/ipinfo-db"
 require "fileutils"
 require "tmpdir"
 require "tempfile"
+require "ipaddr"
 
 describe LogStash::Filters::IpinfoDb do
   describe "ipinfo lookup test" do
@@ -80,6 +81,56 @@ describe LogStash::Filters::IpinfoDb do
       plugin = described_class.new("source" => "ip", "database" => database, "database_age_warning_days" => 0)
       expect(plugin.logger).not_to receive(:warn).with(/outdated/, anything)
       plugin.register
+    end
+  end
+
+  describe "lookup results" do
+    let(:data_dir) { Dir.mktmpdir }
+    let(:database) { File.join(data_dir, "ipinfo.mmdb").tap { |path| File.write(path, "x") } }
+    let(:db) { double("db", :metadata => double("metadata", :build_epoch => Time.now.to_i)) }
+    let(:plugin) { described_class.new("source" => "ip", "database" => database) }
+    after { FileUtils.rm_rf(data_dir) }
+
+    before do
+      allow(MaxMind::DB).to receive(:new).and_return(db)
+      plugin.register
+    end
+
+    def run(fields)
+      LogStash::Event.new(fields).tap { |event| plugin.filter(event) }
+    end
+
+    it "sets the target field when the IP is found" do
+      allow(db).to receive(:get).with("8.8.8.8").and_return("country" => "US")
+      event = run("ip" => "8.8.8.8")
+      expect(event.get("[ipinfo-db][country]")).to eq("US")
+      expect(event.get("tags")).to be_nil
+    end
+
+    it "tags the event when the IP is not in the database" do
+      allow(db).to receive(:get).with("10.0.0.1").and_return(nil)
+      event = run("ip" => "10.0.0.1")
+      expect(event.get("ipinfo-db")).to be_nil
+      expect(event.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
+    end
+
+    it "tags the event without a lookup when the source field is missing" do
+      expect(db).not_to receive(:get)
+      event = run("other" => "x")
+      expect(event.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
+    end
+
+    it "tags the event when the value is not a valid IP" do
+      allow(db).to receive(:get).and_raise(IPAddr::InvalidAddressError, "invalid address: nope")
+      event = run("ip" => "nope")
+      expect(event.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
+    end
+
+    it "logs unexpected errors and tags the event" do
+      allow(db).to receive(:get).and_raise(RuntimeError, "boom")
+      expect(plugin.logger).to receive(:warn).with(/Unexpected error/, hash_including(:message => "boom"))
+      event = run("ip" => "1.2.3.4")
+      expect(event.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
     end
   end
 end

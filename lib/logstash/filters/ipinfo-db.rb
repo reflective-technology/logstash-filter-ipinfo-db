@@ -64,17 +64,37 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
     @logger.debug? && @logger.debug("Running ipinfo-db lookup", :event => event)
     ip = event.get(@source)
 
-    begin
-      ret = @db.get(ip)
-      event.set(@target, ret.to_hash)
-      filter_matched(event)
-    rescue => e
-      tag_unsuccessful_lookup(event)
+    # Misses are common (private IPs, missing fields), so handle them without
+    # raising: exceptions are expensive in JRuby.
+    if ip.nil? || ip == ""
+      tag_unsuccessful_lookup(event, "source field is empty")
+      return
     end
+
+    begin
+      record = @db.get(ip)
+    rescue ArgumentError => e
+      # Not a valid IP address (IPAddr errors are ArgumentErrors), or an IPv6
+      # address looked up in an IPv4-only database.
+      tag_unsuccessful_lookup(event, e.message)
+      return
+    rescue => e
+      @logger.warn("Unexpected error during ipinfo lookup", :ip => ip, :exception => e.class.name, :message => e.message)
+      tag_unsuccessful_lookup(event, e.message)
+      return
+    end
+
+    if record.nil?
+      tag_unsuccessful_lookup(event, "not found in the database")
+      return
+    end
+
+    event.set(@target, record)
+    filter_matched(event)
   end
 
-  def tag_unsuccessful_lookup(event)
-    @logger.debug? && @logger.debug("IP #{event.get(@source)} was not found in the database", :event => event)
+  def tag_unsuccessful_lookup(event, reason)
+    @logger.debug? && @logger.debug("ipinfo lookup failed", :ip => event.get(@source), :reason => reason)
     @tag_on_failure.each{|tag| event.tag(tag)}
   end
 

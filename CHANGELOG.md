@@ -9,6 +9,8 @@
     or invalid download no longer leaves a broken file that blocks every later start
   - Add `database_age_warning_days` (default 30): log a warning at startup and once a day
     when the database is older than that
+  - Handle IPs not in the database and missing source fields without raising exceptions
+    (faster on JRuby); log unexpected lookup errors as warnings instead of swallowing them
   - Pin `down` to `~> 5.4` and `maxmind-db` to `~> 1.2`
 
 ## 0.1.0
