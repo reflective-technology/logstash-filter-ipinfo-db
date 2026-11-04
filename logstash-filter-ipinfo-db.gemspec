@@ -19,7 +19,7 @@ Gem::Specification.new do |s|
 
   # Gem dependencies
   s.add_runtime_dependency "logstash-core-plugin-api", "~> 2.0"
-  s.add_runtime_dependency "down"
-  s.add_runtime_dependency "maxmind-db"
+  s.add_runtime_dependency "down", "~> 5.4"
+  s.add_runtime_dependency "maxmind-db", "~> 1.2"
   s.add_development_dependency 'logstash-devutils'
 end
