@@ -1,0 +1,57 @@
+name: Verify on Logstash
+
+# Builds the gem, installs it into the official Logstash Docker image, runs real pipelines
+# (download, lookups, restart, missing-token error) and the RSpec suite on Logstash's JRuby.
+# See verify/verify.sh. Requires the repository secret IPINFO_TOKEN (an ipinfo.io token).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      matrix:
+        # 8.19.x ships JRuby 9.4, 9.5.x ships JRuby 10.0.
+        logstash-version: ["8.19.24", "9.5.5"]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@a30dfa457ad68707b8b910ac3a244714b61c0626 # v1.320.0
+        with:
+          ruby-version: "3.3"
+
+      - name: Check IPINFO_TOKEN secret
+        env:
+          IPINFO_TOKEN: ${{ secrets.IPINFO_TOKEN }}
+        run: |
+          if [ -z "$IPINFO_TOKEN" ]; then
+            echo "::error::The IPINFO_TOKEN repository secret is not set (secrets are also unavailable to pull requests from forks)."
+            exit 1
+          fi
+
+      - name: Verify on Logstash ${{ matrix.logstash-version }}
+        env:
+          IPINFO_TOKEN: ${{ secrets.IPINFO_TOKEN }}
+        run: verify/verify.sh "${{ matrix.logstash-version }}"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-logs-${{ matrix.logstash-version }}
+          path: verify/out/
+          if-no-files-found: ignore

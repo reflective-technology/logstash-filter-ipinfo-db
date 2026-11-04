@@ -74,6 +74,34 @@ bundle exec rspec
 
 The lookup test downloads the real database and needs `IPINFO_TOKEN` set; the other tests run offline.
 
+### Verify on a real Logstash
+
+`verify/verify.sh` builds the gem, installs it into the official Logstash Docker image, runs real
+pipelines (download as a non-root user with working directory `/`, lookups, restart without token,
+missing-token error) and the RSpec suite on Logstash's JRuby. It needs Docker, Ruby and Python 3:
+
+```sh
+IPINFO_TOKEN=... verify/verify.sh 9.5.5
+```
+
+Logs are written to `verify/out/`. GitHub Actions (`.github/workflows/verify.yml`) runs the same
+script against Logstash 8.19.24 and 9.5.5 on pushes and pull requests to `main`, reading the token
+from the `IPINFO_TOKEN` repository secret.
+
+### Verify on a real Logstash
+
+`verify/verify.sh` builds the gem, installs it into the official Logstash Docker image, runs real
+pipelines (download as a non-root user with working directory `/`, lookups, restart without token,
+missing-token error) and the RSpec suite on Logstash's JRuby. It needs Docker, Ruby and Python 3:
+
+```sh
+IPINFO_TOKEN=... verify/verify.sh 9.5.5
+```
+
+Logs are written to `verify/out/`. The same script runs in GitHub Actions
+(`.github/workflows/verify.yml`) on pushes to `main`, on pull requests, and on demand with a chosen
+Logstash version; it reads the token from the `IPINFO_TOKEN` repository secret.
+
 ### Run the plugin in Logstash
 
 Build and install the gem:
