@@ -27,14 +27,14 @@ For example, if you have a field named `foo` which you want to lookup for locati
 result of lookup in `bar`, do this:
 [source,ruby]
     filter {
-      ipinfo-db-zuin {
+      ipinfo-db {
         source => "foo"
         target => "bar"
       }
     }
 
 [id="plugins-{type}s-{plugin}-options"]
-==== ipinfo-db-zuin Filter Configuration Options
+==== ipinfo-db Filter Configuration Options
 
 This plugin supports the following configuration options plus the <<plugins-{type}s-{plugin}-common-options>> described later.
 
@@ -58,7 +58,7 @@ filter plugins.
   * Value type is <<string,string>>
   * There is no default value for this setting.
 
-The field containing the IP address or hostname to map via ipinfo-db-zuin plugin. The field to lookup in ipinfo database.
+The field containing the IP address or hostname to map via ipinfo-db plugin. The field to lookup in ipinfo database.
 
 [id="plugins-{type}s-{plugin}-tag_on_failure"]
 ===== `tag_on_failure`

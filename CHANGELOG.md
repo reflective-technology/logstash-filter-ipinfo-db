@@ -1,6 +1,6 @@
 ## 0.1.0
 
-  - Forked as `logstash-filter-ipinfo-db-zuin` (filter name `ipinfo-db-zuin`)
+  - Forked as `logstash-filter-ipinfo-db-zuin` (filter name stays `ipinfo-db`)
 
   - Plugin created with the logstash plugin generator
   - Initial devlopment

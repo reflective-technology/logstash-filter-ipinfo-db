@@ -1,12 +1,12 @@
 # encoding: utf-8
 require_relative '../spec_helper'
-require "logstash/filters/ipinfo-db-zuin"
+require "logstash/filters/ipinfo-db"
 
-describe LogStash::Filters::IpinfoDbZuin do
+describe LogStash::Filters::IpinfoDb do
   describe "ipinfo lookup test" do
     config <<-CONFIG
       filter {
-        ipinfo-db-zuin {
+        ipinfo-db {
           source => "ip"
         }
       }
