@@ -90,7 +90,9 @@ docker run --rm -v "$REPO":/plugin:ro \
   --entrypoint bash "$IMAGE" -c '
     export PATH=/usr/share/logstash/vendor/jruby/bin:$JAVA_HOME/bin:$PATH
     cp -r /plugin /tmp/plugin && cd /tmp/plugin && rm -rf verify Gemfile.lock .bundle
-    jruby -v && jruby -S bundle install && jruby -S bundle exec rspec --format documentation' \
+    jruby -v && jruby -S bundle install \
+      && jruby -S bundle exec rspec --format documentation \
+      && jruby -S bundle exec rspec --tag integration --format documentation' \
   >"$OUT/5-rspec.log" 2>&1
 [ $? -eq 0 ] && record PASS "rspec (see out/5-rspec.log)" || record FAIL "rspec (see out/5-rspec.log)"
 

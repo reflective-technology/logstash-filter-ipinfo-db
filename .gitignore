@@ -3,4 +3,5 @@ Gemfile.lock
 .bundle
 vendor
 *.mmdb
+!spec/fixtures/*.mmdb
 verify/out/

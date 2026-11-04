@@ -6,19 +6,109 @@ require "tmpdir"
 require "tempfile"
 require "ipaddr"
 
+# Synthetic database with documentation networks only; see spec/fixtures/generate_ipinfo_test_mmdb.py.
+FIXTURE_DATABASE = File.expand_path("../fixtures/ipinfo-test.mmdb", __dir__)
+
 describe LogStash::Filters::IpinfoDb do
-  describe "ipinfo lookup test" do
+  describe "pipeline lookups against the fixture database" do
     config <<-CONFIG
       filter {
         ipinfo-db {
           source => "ip"
-          token => "#{ENV['IPINFO_TOKEN']}"
+          database => "#{FIXTURE_DATABASE}"
+          database_age_warning_days => 0
         }
       }
     CONFIG
 
-    sample({ "ip" => "173.9.34.107" }) do
-      expect(subject.get("[ipinfo-db][country]")).to eq('US')
+    sample({ "ip" => "192.0.2.10" }) do
+      expect(subject.get("ipinfo-db")).to eq(
+        "country" => "US", "country_name" => "United States",
+        "continent" => "NA", "continent_name" => "North America",
+        "asn" => "AS64496", "as_name" => "Example Networks US", "as_domain" => "example.com"
+      )
+      expect(subject.get("tags")).to be_nil
+    end
+
+    sample({ "ip" => "198.51.100.7" }) do
+      expect(subject.get("[ipinfo-db][country]")).to eq("JP")
+      expect(subject.get("[ipinfo-db][asn]")).to eq("AS64497")
+    end
+
+    sample({ "ip" => "2001:db8::1" }) do
+      expect(subject.get("[ipinfo-db][country]")).to eq("TW")
+      expect(subject.get("[ipinfo-db][asn]")).to eq("AS64498")
+    end
+
+    # Valid but not in the database: left unchanged, not tagged.
+    sample({ "ip" => "10.0.0.1" }) do
+      expect(subject.get("ipinfo-db")).to be_nil
+      expect(subject.get("tags")).to be_nil
+    end
+
+    sample({ "ip" => "not-an-ip" }) do
+      expect(subject.get("ipinfo-db")).to be_nil
+      expect(subject.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
+    end
+
+    sample({ "other" => "no ip field" }) do
+      expect(subject.get("ipinfo-db")).to be_nil
+      expect(subject.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
+    end
+  end
+
+  describe "pipeline with custom target and tag_on_failure" do
+    config <<-CONFIG
+      filter {
+        ipinfo-db {
+          source => "[client][ip]"
+          target => "[client][ipinfo]"
+          tag_on_failure => ["no_ipinfo"]
+          database => "#{FIXTURE_DATABASE}"
+          database_age_warning_days => 0
+        }
+      }
+    CONFIG
+
+    sample({ "client" => { "ip" => "192.0.2.10" } }) do
+      expect(subject.get("[client][ipinfo][country]")).to eq("US")
+      expect(subject.get("ipinfo-db")).to be_nil
+    end
+
+    sample({ "client" => { "ip" => "bogus" } }) do
+      expect(subject.get("tags")).to eq(["no_ipinfo"])
+    end
+  end
+
+  describe "age warning with a real database" do
+    let(:build_epoch) { MaxMind::DB.new(FIXTURE_DATABASE, mode: MaxMind::DB::MODE_MEMORY).metadata.build_epoch }
+
+    it "uses the build time stored in the database" do
+      plugin = described_class.new("source" => "ip", "database" => FIXTURE_DATABASE)
+      allow(Time).to receive(:now).and_return(Time.at(build_epoch + 40 * 86400))
+      expect(plugin.logger).to receive(:warn).with(/outdated/, hash_including(:age_days => 40))
+      plugin.register
+    end
+  end
+
+  # Downloads the real database from ipinfo.io. Excluded by default; run with
+  #   IPINFO_TOKEN=... bundle exec rspec --tag integration
+  describe "live ipinfo.io database", :integration => true do
+    let(:data_dir) { Dir.mktmpdir }
+    after { FileUtils.rm_rf(data_dir) }
+
+    it "downloads the database and looks up a well-known IP" do
+      skip("set IPINFO_TOKEN to run") if ENV["IPINFO_TOKEN"].to_s.empty?
+      database = File.join(data_dir, "country_asn.mmdb")
+      plugin = described_class.new("source" => "ip", "database" => database, "token" => ENV["IPINFO_TOKEN"])
+      plugin.register
+      expect(File.size(database)).to be > 0
+      expect(Dir.children(data_dir)).to eq(["country_asn.mmdb"])
+
+      event = LogStash::Event.new("ip" => "8.8.8.8")
+      plugin.filter(event)
+      expect(event.get("[ipinfo-db][country]")).to eq("US")
+      expect(event.get("[ipinfo-db][asn]")).to eq("AS15169")
     end
   end
 
