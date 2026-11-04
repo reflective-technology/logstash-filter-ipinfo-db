@@ -66,6 +66,69 @@ describe LogStash::Filters::IpinfoDb do
       expect(Dir.children(data_dir)).to eq(["downloaded.mmdb"])
     end
 
+    it "evicts the reader when the last filter using it closes" do
+      first = registered(database)
+      second = registered(database)
+      first.close
+      expect(described_class.cached_reader(database)).to equal(reader(second))
+      second.close
+      expect(described_class.cached_reader(database)).to be_nil
+    end
+
+    it "evicts the old reader when a reload switches to another database path" do
+      old = registered(database)
+      versioned = File.join(data_dir, "ipinfo-v2.mmdb")
+      FileUtils.cp(FIXTURE_DATABASE, versioned)
+      current = registered(versioned)
+      old.close
+      expect(described_class.cached_reader(database)).to be_nil
+      expect(described_class.cached_reader(versioned)).to equal(reader(current))
+    end
+
+    it "loads the file again if it is replaced while it is being loaded" do
+      path = database
+      loads = 0
+      allow(MaxMind::DB).to receive(:new).and_wrap_original do |original, *args, **kwargs|
+        loads += 1
+        loaded = original.call(*args, **kwargs)
+        if loads == 1 # an external updater replaces the file mid-load
+          replacement = File.join(data_dir, "replacement.mmdb")
+          FileUtils.cp(FIXTURE_DATABASE, replacement)
+          File.rename(replacement, path)
+        end
+        loaded
+      end
+
+      registered(path)
+      expect(loads).to eq(2)
+      registered(path) # the cached identity matches the file now there, so no further load
+      expect(loads).to eq(2)
+    end
+
+    it "loads the file again if it is replaced right after a download is moved into place" do
+      target = File.join(data_dir, "downloaded.mmdb")
+      allow(Down).to receive(:download) do
+        Tempfile.new("ipinfo-download").tap do |file|
+          file.binmode
+          file.write(File.binread(FIXTURE_DATABASE))
+          file.flush
+        end
+      end
+      allow(File).to receive(:rename).and_wrap_original do |original, from, to|
+        result = original.call(from, to)
+        if to == target # an external updater rewrites it immediately
+          File.binwrite(to, File.binread(FIXTURE_DATABASE))
+          File.utime(Time.now, Time.now + 60, to)
+        end
+        result
+      end
+      expect(MaxMind::DB).to receive(:new).twice.and_call_original
+
+      plugin = described_class.new("source" => "ip", "database" => target, "token" => "t", "database_age_warning_days" => 0)
+      plugin.register
+      expect(described_class.cached_reader(target)).to equal(reader(plugin))
+    end
+
     it "keeps separate readers for different files" do
       other = File.join(data_dir, "other.mmdb")
       FileUtils.cp(FIXTURE_DATABASE, other)

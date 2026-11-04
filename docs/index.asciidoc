@@ -69,7 +69,9 @@ against the Logstash working directory.
 
 The database is loaded into memory once per file: all `ipinfo-db` filters in the Logstash process that use
 the same path (including across pipelines and config reloads) share one copy. If the file is replaced, the
-next filter that starts, for example after a config reload, loads the new file.
+next filter that starts, for example after a config reload, loads the new file. When no running filter uses a
+database any more (its pipelines stopped, or were reloaded with a different `database` path), it is released
+from memory.
 
 [id="plugins-{type}s-{plugin}-database_age_warning_days"]
 ===== `database_age_warning_days`

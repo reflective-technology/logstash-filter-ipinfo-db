@@ -50,16 +50,24 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # One in-memory reader per database file, shared by every filter instance in
   # the process (several ipinfo-db blocks, pipelines, config reloads), so the
   # database is held in the heap once. Readers are safe to use from multiple
-  # threads. Entries are keyed by the file's identity, so a replaced file is
-  # loaded again by the next instance that registers.
+  # threads.
   #
-  # Setup for a given file (existence check, download, load, cache insert) runs
-  # under a per-path lock, so pipelines starting together download and load a
-  # missing database only once, while unrelated database files still set up in
-  # parallel. @registry_mutex only guards the two hashes.
+  # - Entries record the identity (inode, size, mtime) of the file they were
+  #   loaded from, verified before and after loading, so a replaced file is
+  #   loaded again by the next instance that registers.
+  # - Entries are reference counted: register acquires, close releases, and the
+  #   last release evicts the entry, so readers for files no filter uses any
+  #   more (stopped pipelines, reloads to another database path) can be
+  #   garbage collected.
+  # - Setup for a given file (existence check, download, load, cache insert)
+  #   runs under a per-path lock, so pipelines starting together download and
+  #   load a missing database only once, while unrelated database files still
+  #   set up in parallel. @registry_mutex only guards the hashes.
   @shared_readers = {}
   @path_locks = {}
   @registry_mutex = Mutex.new
+
+  LOAD_ATTEMPTS = 3
 
   class << self
     def with_path_lock(path)
@@ -67,25 +75,55 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
       lock.synchronize { yield }
     end
 
-    # The cached reader for path, if it was loaded from the file currently there.
-    def cached_reader(path)
+    # Acquire the cached reader for path if it was loaded from the file
+    # currently there; nil otherwise.
+    def acquire_reader(path)
       identity = file_identity(path)
-      entry = @registry_mutex.synchronize { @shared_readers[path] }
-      entry[:reader] if entry && entry[:identity] == identity
+      @registry_mutex.synchronize do
+        entry = @shared_readers[path]
+        next nil unless entry && entry[:identity] == identity
+        entry[:refs] += 1
+        entry[:reader]
+      end
     end
 
-    def cache_reader(path, reader)
-      identity = file_identity(path)
-      @registry_mutex.synchronize { @shared_readers[path] = { :identity => identity, :reader => reader } }
+    # Load path and cache the reader under the identity the file had for the
+    # whole load. If the file is replaced while loading, load it again.
+    def load_reader(path)
+      LOAD_ATTEMPTS.times do
+        before = file_identity(path)
+        reader = MaxMind::DB.new(path, mode: MaxMind::DB::MODE_MEMORY)
+        return store_reader(path, before, reader) if file_identity(path) == before
+      end
+      raise LogStash::ConfigurationError, "ipinfo-db: database file #{path} kept changing while it was being loaded"
+    end
+
+    # Cache reader (loaded from the file with identity) with one reference.
+    def store_reader(path, identity, reader)
+      @registry_mutex.synchronize { @shared_readers[path] = { :identity => identity, :reader => reader, :refs => 1 } }
       reader
+    end
+
+    # Drop one reference; evict the entry when no filter uses it any more. A
+    # reader that was already superseded by a newer file is not in the cache.
+    def release_reader(path, reader)
+      @registry_mutex.synchronize do
+        entry = @shared_readers[path]
+        next unless entry && entry[:reader].equal?(reader)
+        entry[:refs] -= 1
+        @shared_readers.delete(path) if entry[:refs] <= 0
+      end
+    end
+
+    # The cached reader for path, if any (no reference taken). For specs.
+    def cached_reader(path)
+      @registry_mutex.synchronize { @shared_readers[File.expand_path(path)] }&.fetch(:reader)
     end
 
     # For specs.
     def clear_shared_readers
       @registry_mutex.synchronize { @shared_readers.clear }
     end
-
-    private
 
     def file_identity(path)
       stat = File.stat(path)
@@ -96,6 +134,11 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   def register
     setup_database
     check_database_age
+  end
+
+  def close
+    self.class.release_reader(@database_path, @db) if @db
+    @db = nil
   end
 
   def filter(event)
@@ -147,17 +190,24 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # Download .mmdb file and load it into mmdb reader
   def setup_database
     @database ||= default_database_path
-    path = File.expand_path(@database)
+    @database_path = File.expand_path(@database)
+    path = @database_path
 
     @db = self.class.with_path_lock(path) do
       if File.exist?(path)
-        self.class.cached_reader(path) ||
-          self.class.cache_reader(path, MaxMind::DB.new(path, mode: MaxMind::DB::MODE_MEMORY))
+        self.class.acquire_reader(path) || self.class.load_reader(path)
       else
         if @token.nil? || @token.value.to_s.empty?
           raise LogStash::ConfigurationError, "ipinfo-db: database file #{@database} not found. Set `token` to download it, or place the file there."
         end
-        self.class.cache_reader(path, download_database)
+        reader, identity = download_database
+        # A rename keeps inode, size and mtime, so a different identity here means
+        # another process replaced the file after our rename: load what is there.
+        if File.exist?(path) && self.class.file_identity(path) == identity
+          self.class.store_reader(path, identity, reader)
+        else
+          self.class.load_reader(path)
+        end
       end
     end
   end
@@ -186,7 +236,8 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # Download into a temp file next to @database, check that it is a readable
   # database, then rename it into place. The rename is atomic, so @database is
   # never a partial or invalid file, even if the download is interrupted or
-  # several pipelines download at the same time.
+  # several pipelines download at the same time. Returns the reader and the
+  # identity of the file it was loaded from.
   def download_database
     @logger.info("Downloading ipinfo database", :path => @database)
     dir = File.dirname(@database)
@@ -200,8 +251,9 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
     rescue MaxMind::DB::InvalidDatabaseError => e
       raise LogStash::ConfigurationError, "ipinfo-db: downloaded database is not a valid .mmdb file: #{e.message}"
     end
+    identity = self.class.file_identity(tmp_path) # only this process writes tmp_path
     File.rename(tmp_path, @database)
-    db
+    [db, identity]
   ensure
     FileUtils.rm_f(tmp_path) if tmp_path
   end
