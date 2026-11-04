@@ -30,6 +30,7 @@ result of lookup in `bar`, do this:
       ipinfo-db {
         source => "foo"
         target => "bar"
+        token => "${IPINFO_TOKEN}"
       }
     }
 
@@ -44,6 +45,7 @@ This plugin supports the following configuration options plus the <<plugins-{typ
 | <<plugins-{type}s-{plugin}-source>> |<<string,string>>|Yes
 | <<plugins-{type}s-{plugin}-tag_on_failure>> |<<array,array>>|No
 | <<plugins-{type}s-{plugin}-target>> |<<string,string>>|No
+| <<plugins-{type}s-{plugin}-token>> |<<password,password>>|No
 |=======================================================================
 
 Also see <<plugins-{type}s-{plugin}-common-options>> for a list of options supported by all
@@ -77,6 +79,16 @@ Tags the event on failure to look up geo information in ipinfo.io free country a
 
 The field to write the lookup results into. 
 
+
+[id="plugins-{type}s-{plugin}-token"]
+===== `token`
+
+  * Value type is <<password,password>>
+  * There is no default value for this setting.
+
+Your ipinfo.io access token, used to download the database file `country_asn.mmdb` when it is not already
+present in the Logstash working directory. If the file is missing and no token is set, the plugin fails to start.
+To keep the token out of the pipeline config, use `${IPINFO_TOKEN}` with an environment variable or the Logstash keystore.
 
 [id="plugins-{type}s-{plugin}-common-options"]
 include::{include_path}/{type}.asciidoc[]

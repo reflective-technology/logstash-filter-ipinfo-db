@@ -3,7 +3,7 @@ require "logstash/filters/base"
 require 'down'
 require 'maxmind/db'
 
-$MMDB_FILE_DOWNLOAD_URL = "https://ipinfo.io/data/free/country_asn.mmdb?token=c0c038dbe0e4e7"
+$MMDB_FILE_DOWNLOAD_URL = "https://ipinfo.io/data/free/country_asn.mmdb"
 $MMDB_FILE_NAME = "country_asn.mmdb"
 
 # This ipinfo-db filter will replace the contents of the default
@@ -34,6 +34,11 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # If not specified, the default value will be used.
   config :tag_on_failure, :validate => :array, :default => ["_ipinfo_db_lookup_failure"]
 
+  # ipinfo.io access token used to download the database. Only needed when
+  # the database file is not already present. Use ${IPINFO_TOKEN} to read it
+  # from an environment variable or the Logstash keystore.
+  config :token, :validate => :password
+
   public
   def register
     setup_database
@@ -62,7 +67,10 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   def setup_database
     # Download mmdb file from ipinfo.io if not found
     if !File.exist?($MMDB_FILE_NAME)
-      tempfile = Down.download($MMDB_FILE_DOWNLOAD_URL)
+      if @token.nil? || @token.value.to_s.empty?
+        raise LogStash::ConfigurationError, "ipinfo-db: #{$MMDB_FILE_NAME} not found and no `token` is set to download it"
+      end
+      tempfile = Down.download("#{$MMDB_FILE_DOWNLOAD_URL}?token=#{@token.value}")
       FileUtils.mv(tempfile.path, "./#{tempfile.original_filename}")
     end
     # Load .mmdb file in MaxMindDB reader

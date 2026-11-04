@@ -8,6 +8,7 @@ describe LogStash::Filters::IpinfoDb do
       filter {
         ipinfo-db {
           source => "ip"
+          token => "#{ENV['IPINFO_TOKEN']}"
         }
       }
     CONFIG
