@@ -33,7 +33,8 @@ echo "### 1. Build the gem and install it into Logstash $LS_VERSION"
 (cd "$REPO" && gem build logstash-filter-ipinfo-db-zuin.gemspec --output "$KIT/plugin.gem") \
   && docker build --build-arg LOGSTASH_VERSION="$LS_VERSION" -t "$IMAGE" "$KIT" >"$OUT/1-build.log" 2>&1 \
   && docker run --rm --entrypoint bin/logstash-plugin "$IMAGE" list --verbose ipinfo >"$OUT/1-list.log" 2>&1 \
-  && grep -q "logstash-filter-ipinfo-db-zuin (0.2.0)" "$OUT/1-list.log"
+  && GEM_VERSION=$(cd "$REPO" && ruby -e 'puts Gem::Specification.load("logstash-filter-ipinfo-db-zuin.gemspec").version') \
+  && grep -qF "logstash-filter-ipinfo-db-zuin ($GEM_VERSION)" "$OUT/1-list.log"
 [ $? -eq 0 ] && record PASS "install (see out/1-list.log)" || record FAIL "install (see out/1-build.log, out/1-list.log)"
 
 echo "### 2. First start with token: download to path.data, lookups"
