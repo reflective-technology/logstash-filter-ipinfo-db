@@ -137,7 +137,7 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   end
 
   def close
-    self.class.release_reader(@database_path, @db) if @db
+    self.class.release_reader(@database, @db) if @db
     @db = nil
   end
 
@@ -189,9 +189,10 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
 
   # Download .mmdb file and load it into mmdb reader
   def setup_database
-    @database ||= default_database_path
-    @database_path = File.expand_path(@database)
-    path = @database_path
+    # Normalize once (expands ~ and makes relative paths absolute) so the existence
+    # check, download, rename and reader cache all use the same path.
+    @database = File.expand_path(@database || default_database_path)
+    path = @database
 
     @db = self.class.with_path_lock(path) do
       if File.exist?(path)

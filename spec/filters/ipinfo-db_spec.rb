@@ -129,6 +129,33 @@ describe LogStash::Filters::IpinfoDb do
       expect(described_class.cached_reader(target)).to equal(reader(plugin))
     end
 
+    it "expands ~ in the database path before downloading and loading" do
+      home = File.join(data_dir, "home")
+      cwd = File.join(data_dir, "cwd")
+      FileUtils.mkdir_p([home, cwd])
+      allow(Down).to receive(:download) do
+        Tempfile.new("ipinfo-download").tap do |file|
+          file.binmode
+          file.write(File.binread(FIXTURE_DATABASE))
+          file.flush
+        end
+      end
+      original_home = ENV["HOME"]
+      begin
+        ENV["HOME"] = home
+        plugin = described_class.new("source" => "ip", "database" => "~/ipinfo/country_asn.mmdb",
+                                     "token" => "t", "database_age_warning_days" => 0)
+        Dir.chdir(cwd) { plugin.register }
+      ensure
+        ENV["HOME"] = original_home
+      end
+
+      expanded = File.join(home, "ipinfo", "country_asn.mmdb")
+      expect(File.file?(expanded)).to be true
+      expect(Dir.children(cwd)).to be_empty # no literal "~" directory
+      expect(described_class.cached_reader(expanded)).to equal(reader(plugin))
+    end
+
     it "keeps separate readers for different files" do
       other = File.join(data_dir, "other.mmdb")
       FileUtils.cp(FIXTURE_DATABASE, other)
