@@ -84,8 +84,9 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
       return
     end
 
+    # Not in the database (e.g. private ranges): not an error, leave the event as is.
     if record.nil?
-      tag_unsuccessful_lookup(event, "not found in the database")
+      @logger.debug? && @logger.debug("IP not found in the ipinfo database", :ip => ip)
       return
     end
 

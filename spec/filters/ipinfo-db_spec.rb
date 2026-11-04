@@ -107,11 +107,11 @@ describe LogStash::Filters::IpinfoDb do
       expect(event.get("tags")).to be_nil
     end
 
-    it "tags the event when the IP is not in the database" do
+    it "leaves the event untouched when the IP is not in the database" do
       allow(db).to receive(:get).with("10.0.0.1").and_return(nil)
       event = run("ip" => "10.0.0.1")
       expect(event.get("ipinfo-db")).to be_nil
-      expect(event.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
+      expect(event.get("tags")).to be_nil
     end
 
     it "tags the event without a lookup when the source field is missing" do

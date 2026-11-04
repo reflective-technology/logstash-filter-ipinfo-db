@@ -93,7 +93,9 @@ The field containing the IP address or hostname to map via ipinfo-db plugin. The
   * Value type is <<array,array>>
   * Default value is `["_ipinfo_db_lookup_failure"]`
 
-Tags the event on failure to look up geo information in ipinfo.io free country and ASN database. This can be used in later analysis.
+Tags the event when the lookup cannot be done: the source field is missing or empty, the value is not a valid
+IP address, or the lookup raises an error. This can be used in later analysis. An IP address that is valid but
+not in the database (for example a private address) is not a failure: the event is left unchanged and not tagged.
 
 [id="plugins-{type}s-{plugin}-target"]
 ===== `target` 

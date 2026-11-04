@@ -11,6 +11,8 @@
     when the database is older than that
   - Handle IPs not in the database and missing source fields without raising exceptions
     (faster on JRuby); log unexpected lookup errors as warnings instead of swallowing them
+  - IPs that are valid but not in the database are no longer tagged with `tag_on_failure`;
+    the event is left unchanged
   - Pin `down` to `~> 5.4` and `maxmind-db` to `~> 1.2`
 
 ## 0.1.0
