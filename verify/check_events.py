@@ -38,6 +38,7 @@ for ip in ["8.8.8.8", "2001:4860:4860::8888"]:
     check(f"{ip}: has asn", str(info.get("asn", "")).startswith("AS"), info)
     check(f"{ip}: not tagged", FAIL_TAG not in e.get("tags", []), e.get("tags"))
 
+check("10.0.0.1 (private): event present", "10.0.0.1" in events)
 e = events.get("10.0.0.1", {})
 check("10.0.0.1 (private): not enriched", "ipinfo-db" not in e, e)
 check("10.0.0.1 (private): not tagged", FAIL_TAG not in e.get("tags", []), e.get("tags"))
