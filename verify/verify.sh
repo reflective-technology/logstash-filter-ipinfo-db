@@ -2,10 +2,12 @@
 # Verify logstash-filter-ipinfo-db-zuin on the official Logstash Docker image.
 #
 # Usage:
-#   export IPINFO_TOKEN=...            # your ipinfo.io token
+#   export IPINFO_TOKEN=...            # optional: your ipinfo.io token
 #   verify/verify.sh [logstash-version]
 #
 # Steps 1-4 install the gem and run real pipelines; step 5 runs the RSpec suite on Logstash's JRuby.
+# Without IPINFO_TOKEN (e.g. CI on pull requests from forks), the checks that download the live
+# database (steps 2-3 and the integration spec) are reported as SKIP; everything else still runs.
 set -uo pipefail
 
 KIT=$(cd "$(dirname "$0")" && pwd)
@@ -15,7 +17,8 @@ IMAGE=ipinfo-db-verify:$LS_VERSION
 VOLUME=ipinfo-db-verify-data
 OUT=$KIT/out
 mkdir -p "$OUT"
-: "${IPINFO_TOKEN:?set IPINFO_TOKEN to your ipinfo.io token}"
+IPINFO_TOKEN=${IPINFO_TOKEN:-}
+export IPINFO_TOKEN
 
 results=()
 record() { results+=("$1 $2"); echo "==> $1 $2"; }
@@ -37,6 +40,10 @@ echo "### 1. Build the gem and install it into Logstash $LS_VERSION"
   && grep -qF "logstash-filter-ipinfo-db-zuin ($GEM_VERSION)" "$OUT/1-list.log"
 [ $? -eq 0 ] && record PASS "install (see out/1-list.log)" || record FAIL "install (see out/1-build.log, out/1-list.log)"
 
+if [ -z "$IPINFO_TOKEN" ]; then
+  echo "### 2-3. Skipped: IPINFO_TOKEN is not set"
+  record SKIP "live download, lookups and restart (IPINFO_TOKEN not set)"
+else
 echo "### 2. First start with token: download to path.data, lookups"
 docker volume rm -f "$VOLUME" >/dev/null 2>&1
 run_pipeline "$VOLUME" pipeline-token.conf "$OUT/2-first-start.log" -e IPINFO_TOKEN
@@ -60,6 +67,7 @@ if ! grep -q 'Downloading ipinfo database' "$OUT/3-restart.log" && python3 -I "$
   record PASS "restart reuses database, no download, no token needed"
 else
   record FAIL "restart (see out/3-restart.log, out/3-events.txt)"
+fi
 fi
 
 echo "### 4. Empty data dir and no token: clear startup error"
@@ -93,9 +101,14 @@ docker run --rm -v "$REPO":/plugin:ro \
     cp -r /plugin /tmp/plugin && cd /tmp/plugin && rm -rf verify Gemfile.lock .bundle
     jruby -v && jruby -S bundle install \
       && jruby -S bundle exec rspec --format documentation \
-      && jruby -S bundle exec rspec --tag integration --format documentation' \
+      && if [ -n "$IPINFO_TOKEN" ]; then
+           jruby -S bundle exec rspec --tag integration --format documentation
+         else
+           echo "Skipping integration specs: IPINFO_TOKEN is not set"
+         fi' \
   >"$OUT/5-rspec.log" 2>&1
 [ $? -eq 0 ] && record PASS "rspec (see out/5-rspec.log)" || record FAIL "rspec (see out/5-rspec.log)"
+[ -z "$IPINFO_TOKEN" ] && record SKIP "integration spec (IPINFO_TOKEN not set)"
 
 echo
 echo "### Summary"

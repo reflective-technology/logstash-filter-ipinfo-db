@@ -45,6 +45,27 @@ describe LogStash::Filters::IpinfoDb do
       expect(reader(second)).not_to equal(reader(first))
     end
 
+    it "downloads a missing database once when filters start at the same time" do
+      missing = File.join(data_dir, "downloaded.mmdb")
+      allow(Down).to receive(:download) do
+        sleep 0.5 # keep the first download in progress while the second filter registers
+        Tempfile.new("ipinfo-download").tap do |file|
+          file.binmode
+          file.write(File.binread(FIXTURE_DATABASE))
+          file.flush
+        end
+      end
+      plugins = Array.new(2) do
+        described_class.new("source" => "ip", "database" => missing, "token" => "t", "database_age_warning_days" => 0)
+      end
+
+      plugins.map { |plugin| Thread.new { plugin.register } }.each(&:join)
+
+      expect(Down).to have_received(:download).once
+      expect(reader(plugins[1])).to equal(reader(plugins[0]))
+      expect(Dir.children(data_dir)).to eq(["downloaded.mmdb"])
+    end
+
     it "keeps separate readers for different files" do
       other = File.join(data_dir, "other.mmdb")
       FileUtils.cp(FIXTURE_DATABASE, other)

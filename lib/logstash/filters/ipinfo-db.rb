@@ -52,26 +52,44 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # database is held in the heap once. Readers are safe to use from multiple
   # threads. Entries are keyed by the file's identity, so a replaced file is
   # loaded again by the next instance that registers.
+  #
+  # Setup for a given file (existence check, download, load, cache insert) runs
+  # under a per-path lock, so pipelines starting together download and load a
+  # missing database only once, while unrelated database files still set up in
+  # parallel. @registry_mutex only guards the two hashes.
   @shared_readers = {}
-  @shared_readers_mutex = Mutex.new
+  @path_locks = {}
+  @registry_mutex = Mutex.new
 
   class << self
-    def shared_reader(path)
-      path = File.expand_path(path)
-      stat = File.stat(path)
-      identity = [stat.ino, stat.size, stat.mtime.to_r]
-      @shared_readers_mutex.synchronize do
-        entry = @shared_readers[path]
-        return entry[:reader] if entry && entry[:identity] == identity
-        reader = yield
-        @shared_readers[path] = { :identity => identity, :reader => reader }
-        reader
-      end
+    def with_path_lock(path)
+      lock = @registry_mutex.synchronize { @path_locks[path] ||= Mutex.new }
+      lock.synchronize { yield }
+    end
+
+    # The cached reader for path, if it was loaded from the file currently there.
+    def cached_reader(path)
+      identity = file_identity(path)
+      entry = @registry_mutex.synchronize { @shared_readers[path] }
+      entry[:reader] if entry && entry[:identity] == identity
+    end
+
+    def cache_reader(path, reader)
+      identity = file_identity(path)
+      @registry_mutex.synchronize { @shared_readers[path] = { :identity => identity, :reader => reader } }
+      reader
     end
 
     # For specs.
     def clear_shared_readers
-      @shared_readers_mutex.synchronize { @shared_readers.clear }
+      @registry_mutex.synchronize { @shared_readers.clear }
+    end
+
+    private
+
+    def file_identity(path)
+      stat = File.stat(path)
+      [stat.ino, stat.size, stat.mtime.to_r]
     end
   end
 
@@ -129,15 +147,18 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # Download .mmdb file and load it into mmdb reader
   def setup_database
     @database ||= default_database_path
+    path = File.expand_path(@database)
 
-    if File.exist?(@database)
-      @db = self.class.shared_reader(@database) { MaxMind::DB.new(@database, mode: MaxMind::DB::MODE_MEMORY) }
-    else
-      if @token.nil? || @token.value.to_s.empty?
-        raise LogStash::ConfigurationError, "ipinfo-db: database file #{@database} not found. Set `token` to download it, or place the file there."
+    @db = self.class.with_path_lock(path) do
+      if File.exist?(path)
+        self.class.cached_reader(path) ||
+          self.class.cache_reader(path, MaxMind::DB.new(path, mode: MaxMind::DB::MODE_MEMORY))
+      else
+        if @token.nil? || @token.value.to_s.empty?
+          raise LogStash::ConfigurationError, "ipinfo-db: database file #{@database} not found. Set `token` to download it, or place the file there."
+        end
+        self.class.cache_reader(path, download_database)
       end
-      downloaded = download_database
-      @db = self.class.shared_reader(@database) { downloaded }
     end
   end
 

@@ -2,7 +2,8 @@ name: Verify on Logstash
 
 # Builds the gem, installs it into the official Logstash Docker image, runs real pipelines
 # (download, lookups, restart, missing-token error) and the RSpec suite on Logstash's JRuby.
-# See verify/verify.sh. Requires the repository secret IPINFO_TOKEN (an ipinfo.io token).
+# See verify/verify.sh. Uses the repository secret IPINFO_TOKEN (an ipinfo.io token) for the live
+# download checks; without it (e.g. pull requests from forks) those are skipped.
 
 on:
   push:
@@ -39,8 +40,7 @@ jobs:
           IPINFO_TOKEN: ${{ secrets.IPINFO_TOKEN }}
         run: |
           if [ -z "$IPINFO_TOKEN" ]; then
-            echo "::error::The IPINFO_TOKEN repository secret is not set (secrets are also unavailable to pull requests from forks)."
-            exit 1
+            echo "::notice::IPINFO_TOKEN is not available (not set, or a pull request from a fork). Live-download checks and integration specs are skipped; offline checks still run."
           fi
 
       - name: Verify on Logstash ${{ matrix.logstash-version }}
