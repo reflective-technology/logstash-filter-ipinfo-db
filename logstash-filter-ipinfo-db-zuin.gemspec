@@ -1,5 +1,5 @@
 Gem::Specification.new do |s|
-  s.name          = 'logstash-filter-ipinfo-db'
+  s.name          = 'logstash-filter-ipinfo-db-zuin'
   s.version       = '0.1.0'
   s.licenses      = ['Apache-2.0']
   s.summary       = 'Logstash Filter Plugin for IPinfoDb'

@@ -6,22 +6,22 @@ require 'maxmind/db'
 $MMDB_FILE_DOWNLOAD_URL = "https://ipinfo.io/data/free/country_asn.mmdb?token=c0c038dbe0e4e7"
 $MMDB_FILE_NAME = "country_asn.mmdb"
 
-# This ipinfo-db filter will replace the contents of the default
+# This ipinfo-db-zuin filter will replace the contents of the default
 # message field with whatever you specify in the configuration.
 #
-# It is only intended to be used as an ipinfo-db.
-class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
+# It is only intended to be used as an ipinfo-db-zuin.
+class LogStash::Filters::IpinfoDbZuin < LogStash::Filters::Base
 
   # Setting the config_name here is required. This is how you
   # configure this filter from your Logstash config.
   #
   # filter {
-  #   ipinfo-db {
+  #   ipinfo-db-zuin {
   #      source => "ip"
   #   }
   # }
   #
-  config_name "ipinfo-db"
+  config_name "ipinfo-db-zuin"
 
   # The field containing the IP address or hostname to map via ipinfo.io. 
   config :source, :validate => :string, :required => true
@@ -41,7 +41,7 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
 
   public
   def filter(event)
-    @logger.debug? && @logger.debug("Running ipinfo-db lookup", :event => event)
+    @logger.debug? && @logger.debug("Running ipinfo-db-zuin lookup", :event => event)
     ip = event.get(@source)
 
     begin
@@ -69,4 +69,4 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
     @db = MaxMind::DB.new($MMDB_FILE_NAME, mode: MaxMind::DB::MODE_MEMORY)
   end
 
-end # class LogStash::Filters::IpinfoDB
+end # class LogStash::Filters::IpinfoDbZuin
