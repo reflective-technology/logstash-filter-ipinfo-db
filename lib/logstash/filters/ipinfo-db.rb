@@ -112,8 +112,13 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
       return
     end
 
-    event.set(@target, record)
-    filter_matched(event)
+    begin
+      event.set(@target, record)
+      filter_matched(event)
+    rescue => e
+      @logger.warn("Unexpected error during ipinfo enrichment", :ip => ip, :exception => e.class.name, :message => e.message)
+      tag_unsuccessful_lookup(event, e.message)
+    end
   end
 
   def tag_unsuccessful_lookup(event, reason)
