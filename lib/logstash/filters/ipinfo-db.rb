@@ -5,27 +5,24 @@ require 'maxmind/db'
 require 'fileutils'
 require 'securerandom'
 
-$MMDB_FILE_DOWNLOAD_URL = "https://ipinfo.io/data/free/country_asn.mmdb"
-$MMDB_FILE_NAME = "country_asn.mmdb"
-
-# This ipinfo-db filter will replace the contents of the default
-# message field with whatever you specify in the configuration.
+# Looks up the country and ASN of an IP address in the ipinfo.io free country
+# and ASN database (.mmdb) and stores the result in the event.
 #
-# It is only intended to be used as an ipinfo-db.
+# filter {
+#   ipinfo-db {
+#     source => "ip"
+#     token => "${IPINFO_TOKEN}"
+#   }
+# }
 class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
 
-  # Setting the config_name here is required. This is how you
-  # configure this filter from your Logstash config.
-  #
-  # filter {
-  #   ipinfo-db {
-  #      source => "ip"
-  #   }
-  # }
-  #
+  DOWNLOAD_URL = "https://ipinfo.io/data/free/country_asn.mmdb"
+  DEFAULT_FILE_NAME = "country_asn.mmdb"
+  AGE_CHECK_INTERVAL = 24 * 60 * 60 # seconds
+
   config_name "ipinfo-db"
 
-  # The field containing the IP address or hostname to map via ipinfo.io. 
+  # The field containing the IP address to look up. Hostnames are not resolved.
   config :source, :validate => :string, :required => true
 
   # The field to write the lookup results into. If not specified, the default
@@ -50,15 +47,11 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # Checked at startup and then once a day. Set to 0 to disable.
   config :database_age_warning_days, :validate => :number, :default => 30
 
-  AGE_CHECK_INTERVAL = 24 * 60 * 60 # seconds
-
-  public
   def register
     setup_database
     check_database_age
-  end # def register
+  end
 
-  public
   def filter(event)
     check_database_age if @next_age_check && Time.now >= @next_age_check
     @logger.debug? && @logger.debug("Running ipinfo-db lookup", :event => event)
@@ -144,7 +137,7 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
     FileUtils.mkdir_p(dir)
     tmp_path = File.join(dir, ".#{File.basename(@database)}.#{SecureRandom.hex(8)}.tmp")
 
-    tempfile = Down.download("#{$MMDB_FILE_DOWNLOAD_URL}?token=#{@token.value}")
+    tempfile = Down.download("#{DOWNLOAD_URL}?token=#{@token.value}")
     FileUtils.mv(tempfile.path, tmp_path)
     begin
       db = MaxMind::DB.new(tmp_path, mode: MaxMind::DB::MODE_MEMORY)
@@ -160,7 +153,7 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # Keep the downloaded database under Logstash's data directory, which is
   # writable by the logstash user and persists across restarts.
   def default_database_path
-    File.join(LogStash::SETTINGS.get_value("path.data"), "plugins", "filters", "ipinfo-db", $MMDB_FILE_NAME)
+    File.join(LogStash::SETTINGS.get_value("path.data"), "plugins", "filters", "ipinfo-db", DEFAULT_FILE_NAME)
   end
 
 end # class LogStash::Filters::IpinfoDb

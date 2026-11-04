@@ -85,7 +85,8 @@ copy. Set to `0` to disable the warning.
   * Value type is <<string,string>>
   * There is no default value for this setting.
 
-The field containing the IP address or hostname to map via ipinfo-db plugin. The field to lookup in ipinfo database.
+The field containing the IP address (IPv4 or IPv6) to look up in the ipinfo database. Hostnames are not resolved;
+a value that is not a valid IP address tags the event with <<plugins-{type}s-{plugin}-tag_on_failure>>.
 
 [id="plugins-{type}s-{plugin}-tag_on_failure"]
 ===== `tag_on_failure`
@@ -101,7 +102,6 @@ not in the database (for example a private address) is not a failure: the event 
 ===== `target` 
 
   * Value type is <<string,string>>
-  * There is no default value for this setting.
   * Default value is `ipinfo-db`
 
 The field to write the lookup results into. 

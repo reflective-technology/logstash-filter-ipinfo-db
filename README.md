@@ -1,86 +1,95 @@
-# Logstash Plugin
+# logstash-filter-ipinfo-db-zuin
 
-This is a plugin for [Logstash](https://github.com/elastic/logstash).
+A [Logstash](https://github.com/elastic/logstash) filter plugin that looks up the country and ASN of an
+IP address in the [ipinfo.io](https://ipinfo.io) free country and ASN database (`.mmdb`), locally,
+without calling the ipinfo API per event.
 
-It is fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way.
+This is a fork of [`logstash-filter-ipinfo-db`](https://rubygems.org/gems/logstash-filter-ipinfo-db).
+The gem is renamed, but the filter is still called `ipinfo-db`, so existing pipeline configs keep working.
+Do not install both gems in the same Logstash.
 
-## Documentation
+The license is Apache 2.0.
 
-Logstash provides infrastructure to automatically generate documentation for this plugin. We use the asciidoc format to write documentation so any comments in the source code will be first converted into asciidoc and then into html. All plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/).
+## Installation
 
-- For formatting code or config example, you can use the asciidoc `[source,ruby]` directive
-- For more asciidoc formatting tips, see the excellent reference here https://github.com/elastic/docs#asciidoc-guide
-
-## Need Help?
-
-Need help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum.
-
-## Developing
-
-### 1. Plugin Developement and Testing
-
-#### Code
-- To get started, you'll need JRuby with the Bundler gem installed.
-
-- Create a new plugin or clone and existing from the GitHub [logstash-plugins](https://github.com/logstash-plugins) organization. We also provide [example plugins](https://github.com/logstash-plugins?query=example).
-
-- Install dependencies
 ```sh
-bundle install
+bin/logstash-plugin install logstash-filter-ipinfo-db-zuin
 ```
 
-#### Test
+## Usage
 
-- Update your dependencies
+```
+filter {
+  ipinfo-db {
+    source => "ip"
+    token => "${IPINFO_TOKEN}"
+  }
+}
+```
+
+On first start, the plugin downloads the database with your ipinfo.io token to
+`<path.data>/plugins/filters/ipinfo-db/country_asn.mmdb` (for example `/var/lib/logstash/...` for
+deb/rpm installs). Store the token in an environment variable or the Logstash keystore:
+
+```sh
+bin/logstash-keystore add IPINFO_TOKEN
+```
+
+The lookup result is written to the `ipinfo-db` field. For `8.8.8.8` it looks like this (illustrative):
+
+```json
+"ipinfo-db": {
+  "country": "US",
+  "country_name": "United States",
+  "continent": "NA",
+  "continent_name": "North America",
+  "asn": "AS15169",
+  "as_name": "Google LLC",
+  "as_domain": "google.com"
+}
+```
+
+| Setting | Default | Description |
+|---|---|---|
+| `source` | (required) | Field containing the IP address (IPv4 or IPv6). Hostnames are not resolved. |
+| `target` | `ipinfo-db` | Field to write the result into. |
+| `token` | none | ipinfo.io token, used only to download the database when the file does not exist. |
+| `database` | `<path.data>/plugins/filters/ipinfo-db/country_asn.mmdb` | Path to the `.mmdb` file. Downloaded there if missing. |
+| `database_age_warning_days` | `30` | Log a warning when the database is older than this. `0` disables it. |
+| `tag_on_failure` | `["_ipinfo_db_lookup_failure"]` | Tags added when the field is missing, the value is not a valid IP, or the lookup fails. IPs that are simply not in the database are not tagged. |
+
+The plugin does not update the database automatically. To refresh it, delete the file and restart
+Logstash, or replace the file with a newer copy. See [docs/index.asciidoc](docs/index.asciidoc) for the
+full reference.
+
+## Development
+
+You need JRuby with Bundler, and a local Logstash for `logstash-core`. Set `LOGSTASH_PATH` if it is not
+in `/usr/share/logstash` (see `Gemfile`).
 
 ```sh
 bundle install
-```
-
-- Run tests
-
-```sh
 bundle exec rspec
 ```
 
-### 2. Running your unpublished Plugin in Logstash
+The lookup test downloads the real database and needs `IPINFO_TOKEN` set; the other tests run offline.
 
-#### 2.1 Run in a local Logstash clone
+### Run the plugin in Logstash
 
-- Edit Logstash `Gemfile` and add the local plugin path, for example:
+Build and install the gem:
+
+```sh
+gem build logstash-filter-ipinfo-db-zuin.gemspec
+bin/logstash-plugin install /path/to/logstash-filter-ipinfo-db-zuin-<version>.gem
+```
+
+Or add it to the Logstash `Gemfile` from your local checkout, then run `bin/logstash-plugin install --no-verify`:
+
 ```ruby
-gem "logstash-filter-awesome", :path => "/your/local/logstash-filter-awesome"
+gem "logstash-filter-ipinfo-db-zuin", :path => "/path/to/logstash-filter-ipinfo-db"
 ```
-- Install plugin
-```sh
-bin/logstash-plugin install --no-verify
-```
-- Run Logstash with your plugin
-```sh
-bin/logstash -e 'filter {awesome {}}'
-```
-At this point any modifications to the plugin code will be applied to this local Logstash setup. After modifying the plugin, simply rerun Logstash.
 
-#### 2.2 Run in an installed Logstash
+## Help
 
-You can use the same **2.1** method to run your plugin in an installed Logstash by editing its `Gemfile` and pointing the `:path` to your local plugin development directory or you can build the gem and install it using:
-
-- Build your plugin gem
-```sh
-gem build logstash-filter-awesome.gemspec
-```
-- Install the plugin from the Logstash home
-```sh
-bin/logstash-plugin install /your/local/plugin/logstash-filter-awesome.gem
-```
-- Start Logstash and proceed to test the plugin
-
-## Contributing
-
-All contributions are welcome: ideas, patches, documentation, bug reports, complaints, and even something you drew up on a napkin.
-
-Programming is not a required skill. Whatever you've seen about open source and maintainers or community members  saying "send patches or die" - you will not see that here.
-
-It is more important to the community that you are able to contribute.
-
-For more information about contributing, see the [CONTRIBUTING](https://github.com/elastic/logstash/blob/main/CONTRIBUTING.md) file.
+Open an issue at https://github.com/reflective-technology/logstash-filter-ipinfo-db/issues, or ask in the
+[Logstash discussion forum](https://discuss.elastic.co/c/logstash).

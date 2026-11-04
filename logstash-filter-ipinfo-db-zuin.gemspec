@@ -3,14 +3,16 @@ Gem::Specification.new do |s|
   s.version       = '0.2.0'
   s.licenses      = ['Apache-2.0']
   s.summary       = 'Logstash Filter Plugin for IPinfoDb'
-  s.description   = ''
+  s.description   = 'This gem is a Logstash plugin required to be installed on top of the Logstash core pipeline ' \
+                    'using $LS_HOME/bin/logstash-plugin install gemname. This gem is not a stand-alone program. ' \
+                    'It looks up the country and ASN of IP addresses in the ipinfo.io free country and ASN database.'
   s.homepage      = 'https://github.com/reflective-technology/logstash-filter-ipinfo-db'
   s.authors       = ['ZUIN RD']
   s.email         = 'rd@zuin.ai'
   s.require_paths = ['lib']
 
   # Files
-  s.files = Dir['lib/**/*','spec/**/*','vendor/**/*','*.gemspec','*.md','CONTRIBUTORS','Gemfile','LICENSE','NOTICE.TXT']
+  s.files = Dir['lib/**/*','spec/**/*','docs/**/*','*.gemspec','*.md','CONTRIBUTORS','Gemfile','LICENSE']
    # Tests
   s.test_files = s.files.grep(%r{^(test|spec|features)/})
 
