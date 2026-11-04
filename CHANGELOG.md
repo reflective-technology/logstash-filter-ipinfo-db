@@ -13,7 +13,8 @@
     (faster on JRuby); log unexpected lookup errors as warnings instead of swallowing them
   - IPs that are valid but not in the database are no longer tagged with `tag_on_failure`;
     the event is left unchanged
-  - Pin `down` to `~> 5.4` and `maxmind-db` to `~> 1.2`
+  - Pin `down` to `~> 5.2` (compatible with `logstash-core`, which requires `down ~> 5.2.0`)
+    and `maxmind-db` to `~> 1.2`
   - Docs: README now documents installation and settings; `source` docs no longer claim hostname
     support; package `docs/` and no longer package `vendor/`
 

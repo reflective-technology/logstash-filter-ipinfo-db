@@ -17,7 +17,7 @@ describe LogStash::Filters::IpinfoDb do
       }
     CONFIG
 
-    sample("ip" => "173.9.34.107") do
+    sample({ "ip" => "173.9.34.107" }) do
       expect(subject.get("[ipinfo-db][country]")).to eq('US')
     end
   end
