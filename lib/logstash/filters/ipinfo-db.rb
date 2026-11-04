@@ -35,9 +35,14 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   config :tag_on_failure, :validate => :array, :default => ["_ipinfo_db_lookup_failure"]
 
   # ipinfo.io access token used to download the database. Only needed when
-  # the database file is not already present. Use ${IPINFO_TOKEN} to read it
+  # the file at `database` does not exist yet. Use ${IPINFO_TOKEN} to read it
   # from an environment variable or the Logstash keystore.
   config :token, :validate => :password
+
+  # Path to the ipinfo .mmdb database file. If the file does not exist, it is
+  # downloaded to this path using `token`. Defaults to
+  # <path.data>/plugins/filters/ipinfo-db/country_asn.mmdb.
+  config :database, :validate => :string
 
   public
   def register
@@ -65,16 +70,28 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
 
   # Download .mmdb file and load it into mmdb reader
   def setup_database
+    @database ||= default_database_path
+
     # Download mmdb file from ipinfo.io if not found
-    if !File.exist?($MMDB_FILE_NAME)
+    if !File.exist?(@database)
       if @token.nil? || @token.value.to_s.empty?
-        raise LogStash::ConfigurationError, "ipinfo-db: #{$MMDB_FILE_NAME} not found and no `token` is set to download it"
+        raise LogStash::ConfigurationError, "ipinfo-db: database file #{@database} not found. Set `token` to download it, or place the file there."
       end
+      @logger.info("Downloading ipinfo database", :path => @database)
+      FileUtils.mkdir_p(File.dirname(@database))
       tempfile = Down.download("#{$MMDB_FILE_DOWNLOAD_URL}?token=#{@token.value}")
-      FileUtils.mv(tempfile.path, "./#{tempfile.original_filename}")
+      FileUtils.mv(tempfile.path, @database)
     end
     # Load .mmdb file in MaxMindDB reader
-    @db = MaxMind::DB.new($MMDB_FILE_NAME, mode: MaxMind::DB::MODE_MEMORY)
+    @db = MaxMind::DB.new(@database, mode: MaxMind::DB::MODE_MEMORY)
+  end
+
+  private
+
+  # Keep the downloaded database under Logstash's data directory, which is
+  # writable by the logstash user and persists across restarts.
+  def default_database_path
+    File.join(LogStash::SETTINGS.get_value("path.data"), "plugins", "filters", "ipinfo-db", $MMDB_FILE_NAME)
   end
 
 end # class LogStash::Filters::IpinfoDb
