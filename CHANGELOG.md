@@ -7,6 +7,8 @@
     Logstash working directory, which is `/` (not writable) under the deb/rpm systemd service
   - Validate the downloaded database before atomically moving it into place, so an interrupted
     or invalid download no longer leaves a broken file that blocks every later start
+  - Add `database_age_warning_days` (default 30): log a warning at startup and once a day
+    when the database is older than that
   - Pin `down` to `~> 5.4` and `maxmind-db` to `~> 1.2`
 
 ## 0.1.0

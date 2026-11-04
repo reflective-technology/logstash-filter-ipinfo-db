@@ -43,6 +43,7 @@ This plugin supports the following configuration options plus the <<plugins-{typ
 |=======================================================================
 |Setting |Input type|Required
 | <<plugins-{type}s-{plugin}-database>> |<<string,string>>|No
+| <<plugins-{type}s-{plugin}-database_age_warning_days>> |<<number,number>>|No
 | <<plugins-{type}s-{plugin}-source>> |<<string,string>>|Yes
 | <<plugins-{type}s-{plugin}-tag_on_failure>> |<<array,array>>|No
 | <<plugins-{type}s-{plugin}-target>> |<<string,string>>|No
@@ -65,6 +66,17 @@ the plugin downloads it to this path on startup using <<plugins-{type}s-{plugin}
 directories as needed. `path.data` is the Logstash data directory (for example `/var/lib/logstash` for
 deb/rpm installs and `/usr/share/logstash/data` in Docker). Use an absolute path; a relative path is resolved
 against the Logstash working directory.
+
+[id="plugins-{type}s-{plugin}-database_age_warning_days"]
+===== `database_age_warning_days`
+
+  * Value type is <<number,number>>
+  * Default value is `30`
+
+The plugin does not update the database by itself. It logs a warning when the database was built more than this
+many days ago, using the build time stored in the `.mmdb` file. The check runs at startup and then once a day.
+To refresh the database, delete the file so it is downloaded again on the next start, or replace it with a newer
+copy. Set to `0` to disable the warning.
 
 [id="plugins-{type}s-{plugin}-source"]
 ===== `source` 

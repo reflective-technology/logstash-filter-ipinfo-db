@@ -46,13 +46,21 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # <path.data>/plugins/filters/ipinfo-db/country_asn.mmdb.
   config :database, :validate => :string
 
+  # Log a warning when the database was built more than this many days ago.
+  # Checked at startup and then once a day. Set to 0 to disable.
+  config :database_age_warning_days, :validate => :number, :default => 30
+
+  AGE_CHECK_INTERVAL = 24 * 60 * 60 # seconds
+
   public
   def register
     setup_database
+    check_database_age
   end # def register
 
   public
   def filter(event)
+    check_database_age if @next_age_check && Time.now >= @next_age_check
     @logger.debug? && @logger.debug("Running ipinfo-db lookup", :event => event)
     ip = event.get(@source)
 
@@ -85,6 +93,25 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   end
 
   private
+
+  # Warn when the loaded database is older than database_age_warning_days,
+  # based on the build time stored in the database itself.
+  def check_database_age
+    @next_age_check = nil
+    return if @database_age_warning_days <= 0
+
+    build_epoch = @db.metadata.build_epoch
+    return if build_epoch.nil?
+
+    @next_age_check = Time.now + AGE_CHECK_INTERVAL
+    age_days = ((Time.now.to_i - build_epoch) / 86400.0).floor
+    if age_days > @database_age_warning_days
+      @logger.warn("ipinfo database is outdated; lookups may be inaccurate. " \
+                   "Delete the file to download a fresh copy on the next start (requires `token`), or replace it",
+                   :path => @database, :age_days => age_days, :built_at => Time.at(build_epoch).utc.to_s,
+                   :database_age_warning_days => @database_age_warning_days)
+    end
+  end
 
   # Download into a temp file next to @database, check that it is a readable
   # database, then rename it into place. The rename is atomic, so @database is

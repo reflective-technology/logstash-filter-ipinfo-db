@@ -50,4 +50,36 @@ describe LogStash::Filters::IpinfoDb do
       expect(Dir.children(data_dir)).to be_empty
     end
   end
+
+  describe "database age warning" do
+    let(:data_dir) { Dir.mktmpdir }
+    let(:database) { File.join(data_dir, "ipinfo.mmdb").tap { |path| File.write(path, "x") } }
+    after { FileUtils.rm_rf(data_dir) }
+
+    def stub_db_built_days_ago(days)
+      metadata = double("metadata", :build_epoch => Time.now.to_i - days * 86400)
+      allow(MaxMind::DB).to receive(:new).and_return(double("db", :metadata => metadata))
+    end
+
+    it "warns when the database is older than database_age_warning_days" do
+      stub_db_built_days_ago(45)
+      plugin = described_class.new("source" => "ip", "database" => database)
+      expect(plugin.logger).to receive(:warn).with(/outdated/, hash_including(:age_days => 45))
+      plugin.register
+    end
+
+    it "does not warn for a recent database" do
+      stub_db_built_days_ago(3)
+      plugin = described_class.new("source" => "ip", "database" => database)
+      expect(plugin.logger).not_to receive(:warn).with(/outdated/, anything)
+      plugin.register
+    end
+
+    it "does not warn when disabled" do
+      stub_db_built_days_ago(400)
+      plugin = described_class.new("source" => "ip", "database" => database, "database_age_warning_days" => 0)
+      expect(plugin.logger).not_to receive(:warn).with(/outdated/, anything)
+      plugin.register
+    end
+  end
 end
