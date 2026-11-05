@@ -1,0 +1,115 @@
+name: Release
+
+# Publishes the gem to RubyGems and creates a GitHub Release when a version tag is pushed.
+#
+# To release: set s.version in logstash-filter-ipinfo-db-zuin.gemspec and add a "## <version>" section at
+# the top of CHANGELOG.md, then merge to main. tag.yml sees the new gemspec version and pushes
+# v<version>, which starts this workflow. (Pushing the tag by hand also works.)
+#
+# The tag must match the gemspec version, the newest CHANGELOG.md section must be for it, and the verify
+# workflow must pass before anything is published. RubyGems authentication uses trusted publishing
+# (OIDC), configured on rubygems.org for this repository and this workflow file; no API key is stored.
+
+on:
+  push:
+    tags:
+      - "v*" # e.g. v0.1.0, must match the gemspec version
+  workflow_dispatch: # re-run from the UI by selecting an existing tag
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      prerelease: ${{ steps.version.outputs.PRERELEASE }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.3"
+
+      - name: Check tag, gemspec version and CHANGELOG
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::Run this workflow on a version tag (v<version>), not on '$GITHUB_REF_NAME'."
+            exit 1
+          fi
+          VERSION=$(ruby -e 'puts Gem::Specification.load("logstash-filter-ipinfo-db-zuin.gemspec").version')
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match the gemspec version '$VERSION' (expected tag 'v$VERSION')."
+            exit 1
+          fi
+          LATEST=$(grep -m1 '^## ' CHANGELOG.md || true)
+          if [ "$LATEST" != "## $VERSION" ]; then
+            echo "::error::The newest CHANGELOG.md section is '$LATEST'; expected '## $VERSION'."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          # RubyGems treats any version with a letter (e.g. 0.2.0.rc1) as a pre-release.
+          PRERELEASE=$(ruby -e 'puts Gem::Version.new(ARGV[0]).prerelease?' "$VERSION")
+          echo "PRERELEASE=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: check
+    uses: ./.github/workflows/verify.yml
+    secrets: inherit
+
+  release:
+    needs: [check, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # OIDC token for RubyGems trusted publishing
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.3"
+
+      - name: Build gem
+        run: gem build logstash-filter-ipinfo-db-zuin.gemspec
+
+      - name: List built gems
+        run: ls -lh ./*.gem
+
+      - name: Configure RubyGems credentials
+        uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+
+      - name: Push gem to RubyGems
+        run: gem push "logstash-filter-ipinfo-db-zuin-${{ needs.check.outputs.version }}.gem"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          name: Release ${{ needs.check.outputs.version }}
+          body: |
+            Release of logstash-filter-ipinfo-db-zuin version ${{ needs.check.outputs.version }}
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for changes.
+
+            ## Installation
+            ```bash
+            bin/logstash-plugin install logstash-filter-ipinfo-db-zuin
+            ```
+
+            Or from the attached gem:
+            ```bash
+            bin/logstash-plugin install logstash-filter-ipinfo-db-zuin-${{ needs.check.outputs.version }}.gem
+            ```
+          files: |
+            *.gem
+          draft: false
+          prerelease: ${{ needs.check.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.check.outputs.prerelease == 'true' && 'false' || 'true' }}
