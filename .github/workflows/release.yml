@@ -84,40 +84,11 @@ jobs:
       - name: List built gems
         run: ls -lh ./*.gem
 
-      # Trusted publishing, done by hand because no release of rubygems/configure-rubygems-credentials or
-      # rubygems/release-gem supports the `owner` input. RubyGems.org only lets trusted publishing create a
-      # new gem when the token exchange names the account that will own it, by its immutable account ID
-      # (shown on that account's Pending Trusted Publishers page), stored in the RUBYGEMS_OWNER_ID secret.
-      # The exchanged API key can only push gems, expires after 15 minutes, and never leaves this step.
+      - name: Configure RubyGems credentials
+        uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+
       - name: Push gem to RubyGems
-        env:
-          RUBYGEMS_OWNER_ID: ${{ secrets.RUBYGEMS_OWNER_ID }}
-          GEM_FILE: logstash-filter-ipinfo-db-zuin-${{ needs.check.outputs.version }}.gem
-        run: |
-          if [ -z "$RUBYGEMS_OWNER_ID" ]; then
-            echo "::error::The RUBYGEMS_OWNER_ID secret is not set. Set it to the RubyGems.org account ID shown on its Pending Trusted Publishers page."
-            exit 1
-          fi
-
-          jwt=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=rubygems.org" | jq -r '.value')
-          echo "::add-mask::$jwt"
-
-          response=$(jq -n --arg jwt "$jwt" --arg owner "$RUBYGEMS_OWNER_ID" '{jwt: $jwt, owner: $owner}' |
-            curl -sS -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' --data @- \
-              https://rubygems.org/api/v1/oidc/trusted_publisher/exchange_token)
-          status=$(tail -n1 <<<"$response")
-          body=$(sed '$d' <<<"$response")
-          if [ "$status" != "201" ]; then
-            echo "::error::RubyGems.org token exchange failed (HTTP $status): $body"
-            exit 1
-          fi
-
-          api_key=$(jq -r '.rubygems_api_key' <<<"$body")
-          echo "::add-mask::$api_key"
-          echo "RubyGems API key issued: $(jq -c '{name, scopes, gem, owner, expires_at}' <<<"$body")"
-
-          GEM_HOST_API_KEY="$api_key" gem push "$GEM_FILE"
+        run: gem push "logstash-filter-ipinfo-db-zuin-${{ needs.check.outputs.version }}.gem"
 
       - name: Create Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
