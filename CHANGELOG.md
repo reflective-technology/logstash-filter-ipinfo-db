@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.0
 
   - Recover from an existing invalid database file (for example truncated or empty): with `token`
     set, log a warning and download a fresh copy; without it, fail with a message saying to delete or
