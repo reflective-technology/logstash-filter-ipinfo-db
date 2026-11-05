@@ -53,8 +53,8 @@ The lookup result is written to the `ipinfo-db` field. For `8.8.8.8` it looks li
 |---|---|---|
 | `source` | (required) | Field containing the IP address (IPv4 or IPv6). Hostnames are not resolved. |
 | `target` | `ipinfo-db` | Field to write the result into. |
-| `token` | none | ipinfo.io token, used only to download the database when the file does not exist. |
-| `database` | `<path.data>/plugins/filters/ipinfo-db/country_asn.mmdb` | Path to the `.mmdb` file. Downloaded there if missing. |
+| `token` | none | ipinfo.io token, used only to download the database: when the file does not exist, or is not a valid database. |
+| `database` | `<path.data>/plugins/filters/ipinfo-db/country_asn.mmdb` | Path to the `.mmdb` file. Downloaded there if missing, or if the file there is not a valid database (with `token`). |
 | `database_age_warning_days` | `30` | Log a warning when the database is older than this. `0` disables it. |
 | `tag_on_failure` | `["_ipinfo_db_lookup_failure"]` | Tags added when the field is missing, the value is not a valid IP, or the lookup fails. IPs that are simply not in the database are not tagged. |
 

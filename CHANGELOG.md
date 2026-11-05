@@ -1,3 +1,9 @@
+## Unreleased
+
+  - Recover from an existing invalid database file (for example truncated or empty): with `token`
+    set, log a warning and download a fresh copy; without it, fail with a message saying to delete or
+    replace the file (#3)
+
 ## 0.3.0
 
   - Declare `required_ruby_version >= 3.1` in the gemspec. Logstash 8.19 (JRuby 9.4, Ruby 3.1
