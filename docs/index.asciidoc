@@ -77,6 +77,10 @@ next filter that starts, for example after a config reload, loads the new file. 
 database any more (its pipelines stopped, or were reloaded with a different `database` path), it is released
 from memory.
 
+When it loads a database, the plugin also indexes the IPv4 /16 blocks that hold no data (private, reserved and
+unused ranges), which takes about a second. Lookups of addresses in those blocks return without searching the
+database, so there is no need to skip private IPv4 addresses with another filter first.
+
 [id="plugins-{type}s-{plugin}-database_age_warning_days"]
 ===== `database_age_warning_days`
 
