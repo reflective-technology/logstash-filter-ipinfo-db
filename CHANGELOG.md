@@ -1,3 +1,8 @@
+## 0.3.0
+
+  - Declare `required_ruby_version >= 3.1` in the gemspec. Logstash 8.19 (JRuby 9.4, Ruby 3.1
+    compatible) is the oldest runtime verified in CI; Logstash 9.x ships JRuby 10.
+
 ## 0.2.0
 
   - Forked as `logstash-filter-ipinfo-db-zuin` (filter name stays `ipinfo-db`)
