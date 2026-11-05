@@ -196,24 +196,47 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
 
     @db = self.class.with_path_lock(path) do
       if File.exist?(path)
-        self.class.acquire_reader(path) || self.class.load_reader(path)
+        self.class.acquire_reader(path) || load_or_replace_invalid(path)
       else
-        if @token.nil? || @token.value.to_s.empty?
-          raise LogStash::ConfigurationError, "ipinfo-db: database file #{@database} not found. Set `token` to download it, or place the file there."
+        unless token_set?
+          raise LogStash::ConfigurationError, "ipinfo-db: database file #{path} not found. Set `token` to download it, or place the file there."
         end
-        reader, identity = download_database
-        # A rename keeps inode, size and mtime, so a different identity here means
-        # another process replaced the file after our rename: load what is there.
-        if File.exist?(path) && self.class.file_identity(path) == identity
-          self.class.store_reader(path, identity, reader)
-        else
-          self.class.load_reader(path)
-        end
+        download_and_cache(path)
       end
     end
   end
 
   private
+
+  def token_set?
+    !(@token.nil? || @token.value.to_s.empty?)
+  end
+
+  # Load an existing database file. If it is not a valid database (for example
+  # truncated by an older version or edited by hand), download a fresh copy when
+  # a token is set; otherwise fail with a message saying how to fix it.
+  def load_or_replace_invalid(path)
+    self.class.load_reader(path)
+  rescue MaxMind::DB::InvalidDatabaseError => e
+    unless token_set?
+      raise LogStash::ConfigurationError, "ipinfo-db: database file #{path} is not a valid .mmdb file (#{e.message}). " \
+                                          "Delete or replace it, or set `token` to download a fresh copy."
+    end
+    @logger.warn("ipinfo database file is not a valid .mmdb file; downloading a fresh copy", :path => path, :error => e.message)
+    download_and_cache(path)
+  end
+
+  # Download the database to path (replacing any file there) and cache its reader.
+  def download_and_cache(path)
+    reader, identity = download_database
+    # A rename keeps inode, size and mtime, so a different identity here means
+    # another process replaced the file after our rename: load what is there.
+    if File.exist?(path) && self.class.file_identity(path) == identity
+      self.class.store_reader(path, identity, reader)
+    else
+      self.class.load_reader(path)
+    end
+  end
 
   # Warn when the loaded database is older than database_age_warning_days,
   # based on the build time stored in the database itself.

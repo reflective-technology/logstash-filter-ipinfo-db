@@ -63,7 +63,11 @@ filter plugins.
 
 Path to the ipinfo `.mmdb` database file. If the file exists, the plugin uses it as is. If it does not exist,
 the plugin downloads it to this path on startup using <<plugins-{type}s-{plugin}-token>>, creating parent
-directories as needed. `path.data` is the Logstash data directory (for example `/var/lib/logstash` for
+directories as needed. If the file exists but is not a valid `.mmdb` database (for example truncated or
+empty), the plugin logs a warning and downloads a fresh copy when `token` is set; without a token it fails to
+start with a message saying to delete or replace the file.
+
+`path.data` is the Logstash data directory (for example `/var/lib/logstash` for
 deb/rpm installs and `/usr/share/logstash/data` in Docker). Use an absolute path; a relative path is resolved
 against the Logstash working directory.
 
