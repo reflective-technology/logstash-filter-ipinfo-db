@@ -269,6 +269,46 @@ describe LogStash::Filters::IpinfoDb do
     let(:data_dir) { Dir.mktmpdir }
     after { FileUtils.rm_rf(data_dir) }
 
+    def stub_download_of_fixture
+      allow(Down).to receive(:download) do
+        Tempfile.new("ipinfo-download").tap do |file|
+          file.binmode
+          file.write(File.binread(FIXTURE_DATABASE))
+          file.flush
+        end
+      end
+    end
+
+    { "corrupt" => "not a database", "empty" => "" }.each do |kind, content|
+      it "replaces an existing #{kind} database file with a fresh download when a token is set" do
+        database = File.join(data_dir, "country_asn.mmdb")
+        File.write(database, content)
+        stub_download_of_fixture
+        plugin = described_class.new("source" => "ip", "database" => database, "token" => "t", "database_age_warning_days" => 0)
+        expect(plugin.logger).to receive(:warn).with(/not a valid \.mmdb file; downloading a fresh copy/, hash_including(:path => database))
+
+        plugin.register
+
+        expect(Down).to have_received(:download).once
+        expect(File.binread(database)).to eq(File.binread(FIXTURE_DATABASE))
+        expect(Dir.children(data_dir)).to eq(["country_asn.mmdb"])
+        event = LogStash::Event.new("ip" => "192.0.2.10")
+        plugin.filter(event)
+        expect(event.get("[ipinfo-db][country]")).to eq("US")
+      end
+    end
+
+    it "fails with instructions when an existing database file is invalid and no token is set" do
+      database = File.join(data_dir, "country_asn.mmdb")
+      File.write(database, "not a database")
+      expect(Down).not_to receive(:download)
+      plugin = described_class.new("source" => "ip", "database" => database)
+
+      expect { plugin.register }.to raise_error(LogStash::ConfigurationError,
+        /#{Regexp.escape(database)} is not a valid \.mmdb file .*Delete or replace it, or set `token`/)
+      expect(File.read(database)).to eq("not a database") # left for the user to inspect
+    end
+
     it "defaults to a file under path.data" do
       allow(LogStash::SETTINGS).to receive(:get_value).and_call_original
       allow(LogStash::SETTINGS).to receive(:get_value).with("path.data").and_return(data_dir)
