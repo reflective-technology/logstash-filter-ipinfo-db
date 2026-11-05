@@ -10,6 +10,8 @@ Gem::Specification.new do |s|
   s.authors       = ['ZUIN RD']
   s.email         = 'rd@zuin.ai'
   s.require_paths = ['lib']
+  # Oldest runtime verified in CI: Logstash 8.19 ships JRuby 9.4, which is Ruby 3.1 compatible.
+  s.required_ruby_version = '>= 3.1'
 
   # Files
   s.files = Dir['lib/**/*','spec/**/*','docs/**/*','*.gemspec','*.md','CONTRIBUTORS','Gemfile','LICENSE']
