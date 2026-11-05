@@ -4,6 +4,8 @@ require 'down'
 require 'maxmind/db'
 require 'fileutils'
 require 'securerandom'
+require 'ipaddr'
+require 'socket'
 
 # Looks up the country and ASN of an IP address in the ipinfo.io free country
 # and ASN database (.mmdb) and stores the result in the event.
@@ -47,10 +49,64 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   # Checked at startup and then once a day. Set to 0 to disable.
   config :database_age_warning_days, :validate => :number, :default => 30
 
-  # One in-memory reader per database file, shared by every filter instance in
+  # A database file loaded into memory: the MaxMind reader, plus an index of the
+  # IPv4 /16 blocks that hold no data at all (private, reserved and unused
+  # space), so lookups there can return nil without searching the database. The
+  # index is built from the database itself, so it is exact for any edition and
+  # needs no list of ranges. Safe to use from multiple threads.
+  class Database
+    BLOCK_BITS = 16 # one index entry per IPv4 /16 block
+
+    # Raises MaxMind::DB::InvalidDatabaseError if a lookup made to build the index
+    # runs into a corrupt part of the search tree.
+    def initialize(reader)
+      @reader = reader
+      @empty_blocks = index_empty_ipv4_blocks
+    end
+
+    def get(address)
+      @reader.get(address)
+    end
+
+    def metadata
+      @reader.metadata
+    end
+
+    # True if the database has no data anywhere in the /16 block of ipv4 (an
+    # IPv4 address as an Integer), so looking it up would return nil.
+    def ipv4_block_empty?(ipv4)
+      @empty_blocks.getbyte(ipv4 >> BLOCK_BITS) == 1
+    end
+
+    private
+
+    # One byte per /16 block, 1 if the block holds no data. Walks the IPv4 space
+    # with one get_with_prefix_length per /16 block or per larger network: about
+    # 36,000 lookups, roughly a second, for the ipinfo country_asn database.
+    def index_empty_ipv4_blocks
+      blocks = "\x00".b * (1 << BLOCK_BITS)
+      address = 0
+      while address < (1 << 32)
+        record, prefix_length = @reader.get_with_prefix_length(IPAddr.new(address, Socket::AF_INET))
+        if prefix_length <= BLOCK_BITS
+          # One network of whole blocks, starting at address.
+          size = 1 << (32 - prefix_length)
+          if record.nil?
+            ((address >> BLOCK_BITS)...((address + size) >> BLOCK_BITS)).each { |block| blocks.setbyte(block, 1) }
+          end
+          address += size
+        else
+          # The block is split into smaller networks, so it may hold data.
+          address = ((address >> BLOCK_BITS) + 1) << BLOCK_BITS
+        end
+      end
+      blocks.freeze
+    end
+  end
+
+  # One in-memory Database per database file, shared by every filter instance in
   # the process (several ipinfo-db blocks, pipelines, config reloads), so the
-  # database is held in the heap once. Readers are safe to use from multiple
-  # threads.
+  # database is held in the heap once.
   #
   # - Entries record the identity (inode, size, mtime) of the file they were
   #   loaded from, verified before and after loading, so a replaced file is
@@ -87,13 +143,14 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
       end
     end
 
-    # Load path and cache the reader under the identity the file had for the
-    # whole load. If the file is replaced while loading, load it again.
+    # Load path, build its Database and cache it under the identity the file
+    # had for the whole load, index build included. If the file is replaced
+    # meanwhile, load it again.
     def load_reader(path)
       LOAD_ATTEMPTS.times do
         before = file_identity(path)
-        reader = MaxMind::DB.new(path, mode: MaxMind::DB::MODE_MEMORY)
-        return store_reader(path, before, reader) if file_identity(path) == before
+        db = Database.new(MaxMind::DB.new(path, mode: MaxMind::DB::MODE_MEMORY))
+        return store_reader(path, before, db) if file_identity(path) == before
       end
       raise LogStash::ConfigurationError, "ipinfo-db: database file #{path} kept changing while it was being loaded"
     end
@@ -115,7 +172,7 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
       end
     end
 
-    # The cached reader for path, if any (no reference taken). For specs.
+    # The cached Database for path, if any (no reference taken). For specs.
     def cached_reader(path)
       @registry_mutex.synchronize { @shared_readers[File.expand_path(path)] }&.fetch(:reader)
     end
@@ -147,15 +204,31 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
     @logger.debug? && @logger.debug("Running ipinfo-db lookup", :event => event)
     ip = event.get(@source)
 
-    # Misses are common (private IPs, missing fields), so handle them without
-    # raising: exceptions are expensive in JRuby.
+    # Misses are common (private IPs, missing fields, placeholders such as "-"),
+    # so handle them without raising: exceptions are expensive in JRuby.
     if ip.nil? || ip == ""
       tag_unsuccessful_lookup(event, "source field is empty")
       return
     end
 
+    address = ip
+    if ip.is_a?(String)
+      ipv4 = parse_ipv4(ip)
+      if ipv4
+        if @db.ipv4_block_empty?(ipv4)
+          @logger.debug? && @logger.debug("IP not found in the ipinfo database", :ip => ip)
+          return
+        end
+        address = IPAddr.new(ipv4, Socket::AF_INET) # saves IPAddr parsing the string again
+      elsif !ip.include?(":") && !ip.include?("/")
+        # Not a dotted quad, and not IPv6 or CIDR notation either: IPAddr would raise.
+        tag_unsuccessful_lookup(event, "not an IP address")
+        return
+      end
+    end
+
     begin
-      record = @db.get(ip)
+      record = @db.get(address)
     rescue ArgumentError => e
       # Not a valid IP address (IPAddr errors are ArgumentErrors), or an IPv6
       # address looked up in an IPv4-only database.
@@ -207,6 +280,38 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
   end
 
   private
+
+  # The Integer value of a dotted-quad IPv4 address, or nil. Accepts exactly the
+  # dotted quads IPAddr accepts: four decimal octets up to 255, no leading zeros.
+  def parse_ipv4(string)
+    length = string.bytesize
+    return nil if length < 7 || length > 15
+    value = 0
+    octet = 0
+    digits = 0
+    dots = 0
+    i = 0
+    while i < length
+      byte = string.getbyte(i)
+      if byte == 46 # "."
+        return nil if digits == 0 || dots == 3
+        value = (value << 8) | octet
+        octet = 0
+        digits = 0
+        dots += 1
+      elsif byte >= 48 && byte <= 57 # "0".."9"
+        return nil if digits > 0 && octet == 0 # leading zero
+        octet = octet * 10 + byte - 48
+        return nil if octet > 255
+        digits += 1
+      else
+        return nil
+      end
+      i += 1
+    end
+    return nil if dots != 3 || digits == 0
+    (value << 8) | octet
+  end
 
   def token_set?
     !(@token.nil? || @token.value.to_s.empty?)
@@ -271,7 +376,7 @@ class LogStash::Filters::IpinfoDb < LogStash::Filters::Base
     tempfile = Down.download("#{DOWNLOAD_URL}?token=#{@token.value}")
     FileUtils.mv(tempfile.path, tmp_path)
     begin
-      db = MaxMind::DB.new(tmp_path, mode: MaxMind::DB::MODE_MEMORY)
+      db = Database.new(MaxMind::DB.new(tmp_path, mode: MaxMind::DB::MODE_MEMORY))
     rescue MaxMind::DB::InvalidDatabaseError => e
       raise LogStash::ConfigurationError, "ipinfo-db: downloaded database is not a valid .mmdb file: #{e.message}"
     end

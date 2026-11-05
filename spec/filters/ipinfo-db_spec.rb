@@ -105,6 +105,27 @@ describe LogStash::Filters::IpinfoDb do
       expect(loads).to eq(2)
     end
 
+    it "loads the file again if it is replaced while its index is being built" do
+      path = database
+      builds = 0
+      allow(described_class::Database).to receive(:new).and_wrap_original do |original, *args|
+        builds += 1
+        built = original.call(*args)
+        if builds == 1 # an external updater replaces the file before the first build returns
+          replacement = File.join(data_dir, "replacement.mmdb")
+          FileUtils.cp(FIXTURE_DATABASE, replacement)
+          File.rename(replacement, path)
+        end
+        built
+      end
+
+      first = registered(path)
+      expect(builds).to eq(2)
+      expect(described_class.cached_reader(path)).to equal(reader(first))
+      registered(path) # the cached identity matches the file now there, so no further load
+      expect(builds).to eq(2)
+    end
+
     it "loads the file again if it is replaced right after a download is moved into place" do
       target = File.join(data_dir, "downloaded.mmdb")
       allow(Down).to receive(:download) do
@@ -233,6 +254,43 @@ describe LogStash::Filters::IpinfoDb do
     end
   end
 
+  describe "index of IPv4 blocks without data" do
+    let(:database) { described_class::Database.new(MaxMind::DB.new(FIXTURE_DATABASE, mode: MaxMind::DB::MODE_MEMORY)) }
+
+    it "marks every /16 block except the two that hold the fixture's IPv4 networks" do
+      with_data = ["192.0.2.0", "198.51.100.0"].map { |ip| IPAddr.new(ip).to_i >> 16 }
+      empty = (0...(1 << 16)).select { |block| database.ipv4_block_empty?(block << 16) }
+      expect(empty.size).to eq((1 << 16) - 2)
+      expect(empty & with_data).to be_empty
+    end
+  end
+
+  describe "values answered without the reader" do
+    let(:reader) { MaxMind::DB.new(FIXTURE_DATABASE, mode: MaxMind::DB::MODE_MEMORY) }
+    let(:plugin) do
+      described_class.new("source" => "ip", "database" => FIXTURE_DATABASE, "database_age_warning_days" => 0).tap(&:register)
+    end
+
+    # Addresses in /16 blocks without data, and values that can't be IP addresses, are answered without
+    # asking the reader. The result must be what the reader would have given.
+    it "get the same result as a plain lookup" do
+      values = ["10.1.2.3", "192.168.0.1", "0.0.0.0", "255.255.255.255", "192.0.2.10", "192.0.3.1", "198.51.100.7",
+                "1.0.0.0", "-", "unknown", "N/A", "x", "1.2.3", "1.2.3.", "1.2.3.4.5", "010.1.2.3", "1.02.3.4",
+                "256.1.2.3", "1.2.3.4:80", "192.0.2.10/24", " 192.0.2.10", "192.0.2.10 ", "192.0.2.10\n",
+                "2001:db8::1", "::1", "fe80::1", "::ffff:192.0.2.10", "[2001:db8::1]"]
+      values.each do |value|
+        expected = begin
+          [reader.get(value), nil]
+        rescue ArgumentError
+          [nil, ["_ipinfo_db_lookup_failure"]]
+        end
+        event = LogStash::Event.new("ip" => value)
+        plugin.filter(event)
+        expect([event.get("ipinfo-db"), event.get("tags")]).to eq(expected), "for #{value.inspect}"
+      end
+    end
+  end
+
   describe "age warning with a real database" do
     let(:build_epoch) { MaxMind::DB.new(FIXTURE_DATABASE, mode: MaxMind::DB::MODE_MEMORY).metadata.build_epoch }
 
@@ -333,6 +391,28 @@ describe LogStash::Filters::IpinfoDb do
       expect { plugin.register }.to raise_error(LogStash::ConfigurationError, /not a valid \.mmdb/)
       expect(Dir.children(data_dir)).to be_empty
     end
+
+    context "when building the index runs into a corrupt search tree" do
+      before do
+        corrupt = double("db")
+        allow(corrupt).to receive(:get_with_prefix_length).and_raise(MaxMind::DB::InvalidDatabaseError, "search tree is corrupt")
+        allow(MaxMind::DB).to receive(:new).and_return(corrupt)
+      end
+
+      it "fails with instructions for an existing file when no token is set" do
+        database = File.join(data_dir, "country_asn.mmdb").tap { |path| File.write(path, "x") }
+        plugin = described_class.new("source" => "ip", "database" => database)
+        expect { plugin.register }.to raise_error(LogStash::ConfigurationError,
+          /is not a valid \.mmdb file \(search tree is corrupt\)\. Delete or replace it/)
+      end
+
+      it "does not keep a download" do
+        stub_download_of_fixture
+        plugin = described_class.new("source" => "ip", "database" => File.join(data_dir, "ipinfo.mmdb"), "token" => "t")
+        expect { plugin.register }.to raise_error(LogStash::ConfigurationError, /downloaded database is not a valid \.mmdb/)
+        expect(Dir.children(data_dir)).to be_empty
+      end
+    end
   end
 
   describe "database age warning" do
@@ -342,7 +422,7 @@ describe LogStash::Filters::IpinfoDb do
 
     def stub_db_built_days_ago(days)
       metadata = double("metadata", :build_epoch => Time.now.to_i - days * 86400)
-      allow(MaxMind::DB).to receive(:new).and_return(double("db", :metadata => metadata))
+      allow(MaxMind::DB).to receive(:new).and_return(double("db", :metadata => metadata, :get_with_prefix_length => [nil, 0]))
     end
 
     it "warns when the database is older than database_age_warning_days" do
@@ -375,6 +455,10 @@ describe LogStash::Filters::IpinfoDb do
     after { FileUtils.rm_rf(data_dir) }
 
     before do
+      # For the index of empty blocks: 10.0.0.0/8 has no data, every other /8 has some.
+      allow(db).to receive(:get_with_prefix_length) do |address|
+        address.to_i >> 24 == 10 ? [nil, 8] : [{}, 8]
+      end
       allow(MaxMind::DB).to receive(:new).and_return(db)
       plugin.register
     end
@@ -384,17 +468,29 @@ describe LogStash::Filters::IpinfoDb do
     end
 
     it "sets the target field when the IP is found" do
-      allow(db).to receive(:get).with("8.8.8.8").and_return("country" => "US")
+      allow(db).to receive(:get).with(IPAddr.new("8.8.8.8")).and_return("country" => "US")
       event = run("ip" => "8.8.8.8")
       expect(event.get("[ipinfo-db][country]")).to eq("US")
       expect(event.get("tags")).to be_nil
     end
 
     it "leaves the event untouched when the IP is not in the database" do
-      allow(db).to receive(:get).with("10.0.0.1").and_return(nil)
-      event = run("ip" => "10.0.0.1")
+      allow(db).to receive(:get).with(IPAddr.new("203.0.113.5")).and_return(nil)
+      event = run("ip" => "203.0.113.5")
       expect(event.get("ipinfo-db")).to be_nil
       expect(event.get("tags")).to be_nil
+    end
+
+    it "skips the lookup for an IPv4 address in a /16 block without data" do
+      expect(db).not_to receive(:get)
+      event = run("ip" => "10.1.2.3")
+      expect(event.get("ipinfo-db")).to be_nil
+      expect(event.get("tags")).to be_nil
+    end
+
+    it "passes IPv6 addresses to the reader as they are" do
+      allow(db).to receive(:get).with("2001:db8::1").and_return("country" => "TW")
+      expect(run("ip" => "2001:db8::1").get("[ipinfo-db][country]")).to eq("TW")
     end
 
     it "tags the event without a lookup when the source field is missing" do
@@ -403,9 +499,16 @@ describe LogStash::Filters::IpinfoDb do
       expect(event.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
     end
 
-    it "tags the event when the value is not a valid IP" do
-      allow(db).to receive(:get).and_raise(IPAddr::InvalidAddressError, "invalid address: nope")
-      event = run("ip" => "nope")
+    it "tags values that cannot be IP addresses without a lookup" do
+      expect(db).not_to receive(:get)
+      ["nope", "-", "1.2.3", "1.2.3.4.5", "010.1.2.3", "256.1.2.3", " 8.8.8.8"].each do |value|
+        expect(run("ip" => value).get("tags")).to eq(["_ipinfo_db_lookup_failure"]), "for #{value.inspect}"
+      end
+    end
+
+    it "tags the event when the reader rejects the value" do
+      allow(db).to receive(:get).with("1.2.3.4:80").and_raise(IPAddr::InvalidAddressError, "invalid address: 1.2.3.4:80")
+      event = run("ip" => "1.2.3.4:80")
       expect(event.get("tags")).to eq(["_ipinfo_db_lookup_failure"])
     end
 
