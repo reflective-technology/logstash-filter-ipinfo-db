@@ -1,4 +1,4 @@
-## Unreleased
+## 0.5.0
 
   - Faster lookups of private IPv4 addresses. When it loads a database, the plugin
     now indexes the IPv4 /16 blocks that hold no data (private, reserved and unused ranges; built
