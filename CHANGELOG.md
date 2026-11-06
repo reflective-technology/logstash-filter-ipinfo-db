@@ -1,3 +1,16 @@
+## Unreleased
+
+  - Faster lookups of private IPv4 addresses. When it loads a database, the plugin
+    now indexes the IPv4 /16 blocks that hold no data (private, reserved and unused ranges; built
+    from the database itself, about a second per file) and answers lookups in them without
+    searching the database. In a benchmark with four lookups per event on private addresses
+    (Logstash 9.5, 2 CPUs, 4 workers), throughput went from about 78k to 265k events/s, more than
+    skipping the lookups with a `ruby` filter in front (116k)
+  - Values that cannot be IP addresses (for example `-` or `unknown`) are tagged without raising an
+    exception inside the lookup: about 18k to 250k events/s in the same benchmark
+  - IPv4 addresses are parsed by the plugin instead of `IPAddr`; lookups of public addresses are
+    unchanged or slightly faster
+
 ## 0.4.0
 
   - Recover from an existing invalid database file (for example truncated or empty): with `token`

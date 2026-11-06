@@ -58,6 +58,11 @@ The lookup result is written to the `ipinfo-db` field. For `8.8.8.8` it looks li
 | `database_age_warning_days` | `30` | Log a warning when the database is older than this. `0` disables it. |
 | `tag_on_failure` | `["_ipinfo_db_lookup_failure"]` | Tags added when the field is missing, the value is not a valid IP, or the lookup fails. IPs that are simply not in the database are not tagged. |
 
+Private IPv4 addresses are cheap to look up. When it loads the database, the plugin indexes
+the IPv4 /16 blocks that hold no data (private, reserved and unused ranges), which takes about a second, and
+answers lookups in them without searching the database. You don't need a `cidr` or `ruby` filter in front of
+`ipinfo-db` to skip private IPv4 addresses.
+
 The plugin does not update the database automatically. To refresh it, delete the file and restart
 Logstash (needs `token`, to download it again), or replace the file with a newer copy and restart or
 reload the pipeline. See [docs/index.asciidoc](docs/index.asciidoc) for the
