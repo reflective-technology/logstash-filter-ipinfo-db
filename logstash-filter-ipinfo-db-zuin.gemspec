@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name          = 'logstash-filter-ipinfo-db-zuin'
-  s.version       = '0.4.0'
+  s.version       = '0.5.0'
   s.licenses      = ['Apache-2.0']
   s.summary       = 'Logstash Filter Plugin for IPinfoDb'
   s.description   = 'This gem is a Logstash plugin required to be installed on top of the Logstash core pipeline ' \
